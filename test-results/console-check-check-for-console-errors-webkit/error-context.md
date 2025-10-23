@@ -1,0 +1,65 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - button "toggle drawer" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+      - generic [ref=e9]: Databricks Application
+      - link "API Docs" [ref=e10] [cursor=pointer]:
+        - /url: http://localhost:8000/docs
+        - img [ref=e12]
+        - text: API Docs
+  - list [ref=e17]:
+    - listitem [ref=e18]:
+      - button "Dashboard" [ref=e19] [cursor=pointer]:
+        - img [ref=e21]
+        - generic [ref=e25]: Dashboard
+    - listitem [ref=e26]:
+      - button "Analytics" [ref=e27] [cursor=pointer]:
+        - img [ref=e29]
+        - generic [ref=e33]: Analytics
+    - listitem [ref=e34]:
+      - button "Reports" [ref=e35] [cursor=pointer]:
+        - img [ref=e37]
+        - generic [ref=e41]: Reports
+    - listitem [ref=e42]:
+      - button "Settings" [ref=e43] [cursor=pointer]:
+        - img [ref=e45]
+        - generic [ref=e49]: Settings
+  - main [ref=e50]:
+    - generic [ref=e52]:
+      - heading "Global Operations Dashboard - Real-time Earthquakes" [level=5] [ref=e54]
+      - generic [ref=e58]:
+        - heading "Earthquake Data (0 events)" [level=6] [ref=e60]
+        - generic [ref=e61]:
+          - paragraph [ref=e62]: Timeframe
+          - group [ref=e63]:
+            - button "Past Hour" [ref=e64] [cursor=pointer]: Past Hour
+            - button "Past Day" [pressed] [ref=e65] [cursor=pointer]: Past Day
+            - button "Past Week" [ref=e66] [cursor=pointer]: Past Week
+            - button "Past Month" [ref=e67] [cursor=pointer]: Past Month
+        - generic [ref=e68]:
+          - paragraph [ref=e69]: "Minimum Magnitude: 2.5"
+          - slider [ref=e85]: "2.5"
+      - generic [ref=e88]:
+        - region "Map" [ref=e89]
+        - generic:
+          - generic [ref=e90]:
+            - button "Zoom in" [ref=e91] [cursor=pointer]
+            - button "Zoom out" [ref=e93] [cursor=pointer]
+            - button "Reset bearing to north" [ref=e95]
+          - group [ref=e97]:
+            - generic "Toggle attribution" [ref=e98] [cursor=pointer]
+            - generic [ref=e99]:
+              - link "MapLibre" [ref=e100]:
+                - /url: https://maplibre.org/
+              - text: "| ©"
+              - link "CARTO" [ref=e101]:
+                - /url: https://carto.com/about-carto/
+              - text: ", ©"
+              - link "OpenStreetMap" [ref=e102]:
+                - /url: http://www.openstreetmap.org/about/
+              - text: contributors
+```

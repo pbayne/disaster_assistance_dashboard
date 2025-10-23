@@ -1,6 +1,10 @@
-import { AppBar, Toolbar, Typography, IconButton, Button } from '@mui/material'
+import { useContext } from 'react'
+import { AppBar, Toolbar, Typography, IconButton, Button, useTheme } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import ApiIcon from '@mui/icons-material/Api'
+import Brightness4Icon from '@mui/icons-material/Brightness4'
+import Brightness7Icon from '@mui/icons-material/Brightness7'
+import { ColorModeContext } from '../main'
 
 interface AppBarProps {
   drawerOpen: boolean
@@ -15,6 +19,9 @@ export default function AppBarComponent({
   drawerWidthClosed,
   onMenuClick,
 }: AppBarProps) {
+  const theme = useTheme()
+  const colorMode = useContext(ColorModeContext)
+
   return (
     <AppBar
       position="fixed"
@@ -43,8 +50,16 @@ export default function AppBarComponent({
           <MenuIcon />
         </IconButton>
         <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-          Databricks Application
+          Disaster Assistance Dashboard
         </Typography>
+        <IconButton
+          sx={{ mr: 1 }}
+          onClick={colorMode.toggleColorMode}
+          color="inherit"
+          aria-label="toggle theme"
+        >
+          {theme.palette.mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
+        </IconButton>
         <Button
           color="inherit"
           startIcon={<ApiIcon />}

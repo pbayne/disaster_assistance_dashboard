@@ -1,139 +1,241 @@
-import { useEffect, useState } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet'
-import { Box, Card, CardContent, Typography, Stack, Chip } from '@mui/material'
+import { useEffect, useState, useRef } from 'react'
+import Map, { Marker, Popup, NavigationControl, Layer, Source } from 'react-map-gl/maplibre'
+import { Box, Card, CardContent, Typography, Stack, Chip, ToggleButtonGroup, ToggleButton, Slider, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, useTheme, Dialog, DialogTitle, DialogContent, DialogActions, Button, Divider, Grid } from '@mui/material'
+import HomeIcon from '@mui/icons-material/Home'
+import CloseIcon from '@mui/icons-material/Close'
 import { motion } from 'framer-motion'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
+import 'maplibre-gl/dist/maplibre-gl.css'
+import '../map-popup.css'
 
-// Fix for default marker icons in react-leaflet
-import icon from 'leaflet/dist/images/marker-icon.png'
-import iconShadow from 'leaflet/dist/images/marker-shadow.png'
+interface EarthquakeData {
+  id: string
+  magnitude: number
+  place: string
+  time: number
+  longitude: number
+  latitude: number
+  depth: number
+  url: string
+  tsunami: number
+  type: string
+}
 
-let DefaultIcon = L.icon({
-  iconUrl: icon,
-  shadowUrl: iconShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-})
-
-L.Marker.prototype.options.icon = DefaultIcon
-
-interface LocationData {
-  id: number
+interface HomeownerApplicant {
+  id: string
   name: string
-  lat: number
-  lng: number
-  value: number
-  status: 'active' | 'warning' | 'inactive'
-  description: string
+  address: string
+  latitude: number
+  longitude: number
+  phone: string
+  damage_type: string
+  assistance_requested: string
+  status: string
+  application_date: string
+  family_size: number
+  estimated_damage: number
 }
 
-// Sample location data
-const sampleLocations: LocationData[] = [
-  {
-    id: 1,
-    name: 'San Francisco',
-    lat: 37.7749,
-    lng: -122.4194,
-    value: 1250,
-    status: 'active',
-    description: 'Primary data center with high traffic',
-  },
-  {
-    id: 2,
-    name: 'New York',
-    lat: 40.7128,
-    lng: -74.0060,
-    value: 980,
-    status: 'active',
-    description: 'East coast operations hub',
-  },
-  {
-    id: 3,
-    name: 'London',
-    lat: 51.5074,
-    lng: -0.1278,
-    value: 750,
-    status: 'warning',
-    description: 'European regional center',
-  },
-  {
-    id: 4,
-    name: 'Tokyo',
-    lat: 35.6762,
-    lng: 139.6503,
-    value: 890,
-    status: 'active',
-    description: 'Asia-Pacific headquarters',
-  },
-  {
-    id: 5,
-    name: 'Sydney',
-    lat: -33.8688,
-    lng: 151.2093,
-    value: 450,
-    status: 'inactive',
-    description: 'Oceania satellite office',
-  },
-]
-
-// Component to handle map updates
-function MapUpdater({ center }: { center: [number, number] }) {
-  const map = useMap()
-  useEffect(() => {
-    map.setView(center, map.getZoom())
-  }, [center, map])
-  return null
+// Get API base URL based on environment
+const getApiBaseUrl = () => {
+  // In development, use localhost:8000
+  // In production (Databricks), use relative paths
+  if (import.meta.env.DEV) {
+    return 'http://localhost:8000'
+  }
+  return ''
 }
 
-export default function Map() {
-  const [locations, setLocations] = useState<LocationData[]>(sampleLocations)
-  const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null)
-  const [mapCenter, setMapCenter] = useState<[number, number]>([20, 0])
+// Helper function to create a circle polygon around a point
+const createCircle = (longitude: number, latitude: number, radiusMiles: number): [number, number][] => {
+  const points = 64 // Number of points to make the circle smooth
+  const coords: [number, number][] = []
 
-  // Simulate reactive data updates
+  // Convert miles to degrees (approximate)
+  // 1 degree latitude ≈ 69 miles
+  // 1 degree longitude varies by latitude
+  const radiusLat = radiusMiles / 69
+  const radiusLng = radiusMiles / (69 * Math.cos(latitude * Math.PI / 180))
+
+  for (let i = 0; i <= points; i++) {
+    const angle = (i / points) * 2 * Math.PI
+    const dx = radiusLng * Math.cos(angle)
+    const dy = radiusLat * Math.sin(angle)
+    coords.push([longitude + dx, latitude + dy])
+  }
+
+  return coords
+}
+
+export default function MapComponent() {
+  const theme = useTheme()
+  const [earthquakes, setEarthquakes] = useState<EarthquakeData[]>([])
+  const [selectedEarthquake, setSelectedEarthquake] = useState<EarthquakeData | null>(null)
+  const [radiusCircle, setRadiusCircle] = useState<[number, number][] | null>(null)
+  const [homeowners, setHomeowners] = useState<HomeownerApplicant[]>([])
+  const [selectedHomeowner, setSelectedHomeowner] = useState<HomeownerApplicant | null>(null)
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
+  const [detailsHomeowner, setDetailsHomeowner] = useState<HomeownerApplicant | null>(null)
+  const [timeframe, setTimeframe] = useState<string>('day')
+  const [minMagnitude, setMinMagnitude] = useState<number>(2.5)
+  const [viewState, setViewState] = useState({
+    longitude: -98.5795,
+    latitude: 39.8283,
+    zoom: 3.5
+  })
+  const tableRowRefs = useRef<{ [key: string]: HTMLTableRowElement | null }>({})
+  const mapRef = useRef<any>(null)
+
+  // Fetch earthquake data
   useEffect(() => {
-    const interval = setInterval(() => {
-      setLocations((prev) =>
-        prev.map((loc) => ({
-          ...loc,
-          value: Math.floor(Math.random() * 1000) + 400,
-        }))
-      )
-    }, 5000)
+    const fetchEarthquakes = async () => {
+      try {
+        const apiBase = getApiBaseUrl()
+        const response = await fetch(
+          `${apiBase}/api/earthquakes?timeframe=${timeframe}&min_magnitude=${minMagnitude}`
+        )
+        const data = await response.json()
+        setEarthquakes(data.earthquakes || [])
+      } catch (error) {
+        console.error('Error fetching earthquake data:', error)
+      }
+    }
 
+    fetchEarthquakes()
+    // Refresh earthquake data every 5 minutes
+    const interval = setInterval(fetchEarthquakes, 300000)
     return () => clearInterval(interval)
-  }, [])
+  }, [timeframe, minMagnitude])
 
-  const getStatusColor = (status: string) => {
+  // Scroll to selected homeowner row in table
+  useEffect(() => {
+    if (selectedHomeowner && tableRowRefs.current[selectedHomeowner.id]) {
+      tableRowRefs.current[selectedHomeowner.id]?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      })
+    }
+  }, [selectedHomeowner])
+
+  const getEarthquakeColor = (magnitude: number) => {
+    if (magnitude >= 6.0) return '#d32f2f' // Major
+    if (magnitude >= 5.0) return '#f57c00' // Strong
+    if (magnitude >= 4.0) return '#fbc02d' // Moderate
+    if (magnitude >= 3.0) return '#ffeb3b' // Light
+    return '#8bc34a' // Minor
+  }
+
+  const getEarthquakeSize = (magnitude: number) => {
+    return Math.max(10, magnitude * 6)
+  }
+
+  const getHomeownerStatusColor = (status: string) => {
     switch (status) {
-      case 'active':
-        return '#4caf50'
-      case 'warning':
-        return '#ff9800'
-      case 'inactive':
-        return '#f44336'
+      case 'Approved':
+        return '#4caf50' // Green
+      case 'Under Review':
+        return '#ff9800' // Orange
+      case 'Pending':
+        return '#9e9e9e' // Gray
+      case 'Processing':
+        return '#2196f3' // Blue
+      case 'Rejected':
+        return '#f44336' // Red
       default:
-        return '#9e9e9e'
+        return '#2196f3' // Default blue
     }
   }
 
-  const getStatusChipColor = (status: string) => {
-    switch (status) {
-      case 'active':
-        return 'success'
-      case 'warning':
-        return 'warning'
-      case 'inactive':
-        return 'error'
-      default:
-        return 'default'
-    }
+  const getHomeownerIconSize = (estimatedDamage: number, isSelected: boolean) => {
+    // Scale based on damage: $5k-$150k range
+    // Base size: 16-32, Selected adds 8px, Hover adds more
+    const minDamage = 5000
+    const maxDamage = 150000
+    const minSize = 16
+    const maxSize = 32
+
+    const normalizedDamage = Math.min(Math.max(estimatedDamage, minDamage), maxDamage)
+    const scale = (normalizedDamage - minDamage) / (maxDamage - minDamage)
+    const baseSize = minSize + (scale * (maxSize - minSize))
+
+    return isSelected ? baseSize + 8 : baseSize
   }
 
-  const handleLocationClick = (location: LocationData) => {
-    setSelectedLocation(location)
-    setMapCenter([location.lat, location.lng])
+  const handleEarthquakeClick = async (earthquake: EarthquakeData) => {
+    setSelectedEarthquake(earthquake)
+    setSelectedHomeowner(null)
+
+    // Create 25-mile radius circle around the earthquake
+    const circle = createCircle(earthquake.longitude, earthquake.latitude, 25)
+    setRadiusCircle(circle)
+
+    // Fetch homeowner applicants within the radius
+    try {
+      const apiBase = getApiBaseUrl()
+      const response = await fetch(
+        `${apiBase}/api/homeowners?latitude=${earthquake.latitude}&longitude=${earthquake.longitude}&radius_miles=25`
+      )
+      const data = await response.json()
+      setHomeowners(data.applicants || [])
+    } catch (error) {
+      console.error('Error fetching homeowner data:', error)
+      setHomeowners([])
+    }
+
+    // Zoom to earthquake location
+    setViewState({
+      ...viewState,
+      longitude: earthquake.longitude,
+      latitude: earthquake.latitude,
+      zoom: 8
+    })
+  }
+
+  const handleHomeownerRowClick = (homeowner: HomeownerApplicant) => {
+    setSelectedHomeowner(homeowner)
+    // Zoom to homeowner location
+    setViewState({
+      ...viewState,
+      longitude: homeowner.longitude,
+      latitude: homeowner.latitude,
+      zoom: 12
+    })
+  }
+
+  const handleOpenDetails = (homeowner: HomeownerApplicant, event: React.MouseEvent) => {
+    event.stopPropagation() // Prevent row click
+    setDetailsHomeowner(homeowner)
+    setDetailsDialogOpen(true)
+  }
+
+  const handleCloseDetails = () => {
+    setDetailsDialogOpen(false)
+  }
+
+  const handleMapLoad = () => {
+    if (!mapRef.current) return
+
+    const map = mapRef.current.getMap()
+
+    // Increase font sizes for street labels
+    map.on('styledata', () => {
+      const layers = map.getStyle().layers
+
+      layers.forEach((layer: any) => {
+        if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
+          // Increase text size for all text labels
+          if (layer.layout['text-size']) {
+            const currentSize = layer.layout['text-size']
+            if (typeof currentSize === 'number') {
+              map.setLayoutProperty(layer.id, 'text-size', currentSize * 1.5)
+            } else if (currentSize.stops) {
+              // Handle zoom-based sizing
+              const newStops = currentSize.stops.map((stop: any) => [stop[0], stop[1] * 1.5])
+              map.setLayoutProperty(layer.id, 'text-size', { ...currentSize, stops: newStops })
+            }
+          }
+        }
+      })
+    })
   }
 
   return (
@@ -143,55 +245,86 @@ export default function Map() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <Typography variant="h5" gutterBottom>
-          Global Operations Dashboard
-        </Typography>
+        <Box
+          sx={{
+            background: 'linear-gradient(135deg, #FF3621 0%, #FF8C00 100%)',
+            borderRadius: 3,
+            p: 3,
+            mb: 2,
+            boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+          }}
+        >
+          <Typography variant="h5" gutterBottom sx={{ color: 'white', fontWeight: 700, mb: 1 }}>
+            🌍 Global Earthquake Monitor
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.9)' }}>
+            Real-time earthquake data with homeowner assistance tracking
+          </Typography>
+        </Box>
       </motion.div>
 
-      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-        {locations.map((location, index) => (
-          <motion.div
-            key={location.id}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: index * 0.1 }}
-          >
-            <Card
-              sx={{
-                minWidth: 180,
-                cursor: 'pointer',
-                transition: 'all 0.3s',
-                '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: 4,
-                },
-                border: selectedLocation?.id === location.id ? 2 : 0,
-                borderColor: 'primary.main',
-              }}
-              onClick={() => handleLocationClick(location)}
-            >
-              <CardContent>
-                <Stack spacing={1}>
-                  <Typography variant="h6" component="div">
-                    {location.name}
-                  </Typography>
-                  <Chip
-                    label={location.status.toUpperCase()}
-                    color={getStatusChipColor(location.status) as any}
-                    size="small"
-                  />
-                  <Typography variant="h4" color="primary">
-                    {location.value}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Active Users
-                  </Typography>
-                </Stack>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </Box>
+      {/* Earthquake Controls */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        <Card sx={{
+          background: theme.palette.mode === 'dark'
+            ? 'linear-gradient(to bottom right, #1e293b, #0f172a)'
+            : 'linear-gradient(to bottom right, #ffffff, #f0f9ff)',
+          border: '2px solid',
+          borderColor: 'primary.light',
+        }}>
+          <CardContent>
+            <Stack spacing={2}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="h6" sx={{
+                  background: 'linear-gradient(135deg, #FF3621, #FF8C00)',
+                  backgroundClip: 'text',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  fontWeight: 700,
+                }}>
+                  ⚡ Earthquake Data ({earthquakes.length} events)
+                </Typography>
+              </Box>
+
+              <Box>
+                <Typography gutterBottom>Timeframe</Typography>
+                <ToggleButtonGroup
+                  value={timeframe}
+                  exclusive
+                  onChange={(_, value) => value && setTimeframe(value)}
+                  size="small"
+                  color="primary"
+                >
+                  <ToggleButton value="hour">Past Hour</ToggleButton>
+                  <ToggleButton value="day">Past Day</ToggleButton>
+                  <ToggleButton value="week">Past Week</ToggleButton>
+                  <ToggleButton value="month">Past Month</ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+
+              <Box>
+                <Typography gutterBottom>
+                  Minimum Magnitude: {minMagnitude}
+                </Typography>
+                <Slider
+                  value={minMagnitude}
+                  onChange={(_, value) => setMinMagnitude(value as number)}
+                  min={1.0}
+                  max={6.0}
+                  step={0.5}
+                  marks
+                  valueLabelDisplay="auto"
+                  color="primary"
+                />
+              </Box>
+            </Stack>
+          </CardContent>
+        </Card>
+      </motion.div>
 
       <motion.div
         initial={{ opacity: 0 }}
@@ -200,91 +333,413 @@ export default function Map() {
         style={{ flex: 1, minHeight: '500px' }}
       >
         <Card sx={{ height: '100%' }}>
-          <MapContainer
-            center={mapCenter}
-            zoom={2}
-            style={{ height: '100%', width: '100%' }}
-            scrollWheelZoom={true}
+          <Map
+            ref={mapRef}
+            {...viewState}
+            onMove={evt => setViewState(evt.viewState)}
+            onLoad={handleMapLoad}
+            style={{ width: '100%', height: '100%' }}
+            mapStyle={
+              theme.palette.mode === 'dark'
+                ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
+                : 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
+            }
           >
-            <MapUpdater center={mapCenter} />
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            {locations.map((location) => (
-              <div key={location.id}>
-                <Circle
-                  center={[location.lat, location.lng]}
-                  radius={location.value * 100}
-                  pathOptions={{
-                    fillColor: getStatusColor(location.status),
-                    fillOpacity: 0.3,
-                    color: getStatusColor(location.status),
-                    weight: 2,
+            <NavigationControl position="top-right" />
+
+            {/* 25-Mile Radius Circle */}
+            {radiusCircle && (
+              <Source
+                id="radius-circle"
+                type="geojson"
+                data={{
+                  type: 'Feature',
+                  geometry: {
+                    type: 'Polygon',
+                    coordinates: [radiusCircle]
+                  },
+                  properties: {}
+                }}
+              >
+                <Layer
+                  id="circle-fill"
+                  type="fill"
+                  paint={{
+                    'fill-color': '#ff6b6b',
+                    'fill-opacity': 0.15
                   }}
                 />
-                <Marker
-                  position={[location.lat, location.lng]}
-                  eventHandlers={{
-                    click: () => handleLocationClick(location),
+                <Layer
+                  id="circle-outline"
+                  type="line"
+                  paint={{
+                    'line-color': '#ff6b6b',
+                    'line-width': 2,
+                    'line-dasharray': [2, 2]
                   }}
-                >
-                  <Popup>
-                    <Box sx={{ p: 1 }}>
-                      <Typography variant="h6">{location.name}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {location.description}
-                      </Typography>
-                      <Typography variant="h5" color="primary" sx={{ mt: 1 }}>
-                        {location.value}
-                      </Typography>
-                      <Typography variant="caption">Active Users</Typography>
-                      <Box sx={{ mt: 1 }}>
-                        <Chip
-                          label={location.status.toUpperCase()}
-                          color={getStatusChipColor(location.status) as any}
-                          size="small"
-                        />
-                      </Box>
-                    </Box>
-                  </Popup>
-                </Marker>
-              </div>
+                />
+              </Source>
+            )}
+
+            {/* Homeowner Markers */}
+            {homeowners.map((homeowner) => (
+              <Marker
+                key={homeowner.id}
+                longitude={homeowner.longitude}
+                latitude={homeowner.latitude}
+                anchor="bottom"
+                onClick={(e) => {
+                  e.originalEvent.stopPropagation()
+                  handleHomeownerRowClick(homeowner)
+                }}
+              >
+                <HomeIcon
+                  sx={{
+                    fontSize: getHomeownerIconSize(homeowner.estimated_damage, selectedHomeowner?.id === homeowner.id),
+                    color: getHomeownerStatusColor(homeowner.status),
+                    filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s',
+                    '&:hover': {
+                      fontSize: 48,
+                    },
+                  }}
+                />
+              </Marker>
             ))}
-          </MapContainer>
+
+            {/* Earthquake Markers */}
+            {earthquakes.map((earthquake) => (
+              <Marker
+                key={earthquake.id}
+                longitude={earthquake.longitude}
+                latitude={earthquake.latitude}
+                anchor="center"
+                onClick={e => {
+                  e.originalEvent.stopPropagation()
+                  handleEarthquakeClick(earthquake)
+                }}
+              >
+                <Box
+                  sx={{
+                    width: getEarthquakeSize(earthquake.magnitude),
+                    height: getEarthquakeSize(earthquake.magnitude),
+                    borderRadius: '50%',
+                    backgroundColor: getEarthquakeColor(earthquake.magnitude),
+                    border: '2px solid white',
+                    boxShadow: 3,
+                    cursor: 'pointer',
+                    opacity: 0.7,
+                    transition: 'all 0.3s',
+                    '&:hover': {
+                      transform: 'scale(1.3)',
+                      opacity: 1,
+                    },
+                  }}
+                />
+              </Marker>
+            ))}
+
+            {/* Earthquake Popup */}
+            {selectedEarthquake && (
+              <Popup
+                anchor="top"
+                longitude={selectedEarthquake.longitude}
+                latitude={selectedEarthquake.latitude}
+                onClose={() => {
+                  setSelectedEarthquake(null)
+                  setRadiusCircle(null)
+                }}
+                closeOnClick={false}
+              >
+                <Box sx={{
+                  p: 2,
+                  minWidth: 250,
+                  backgroundColor: theme.palette.background.paper,
+                  color: theme.palette.text.primary,
+                  borderRadius: 2,
+                  boxShadow: theme.palette.mode === 'dark'
+                    ? '0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.5)'
+                    : '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'
+                }}>
+                  <Typography variant="h6" sx={{ color: getEarthquakeColor(selectedEarthquake.magnitude) }}>
+                    M {selectedEarthquake.magnitude.toFixed(1)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    {selectedEarthquake.place}
+                  </Typography>
+                  <Chip
+                    label="25-mile radius"
+                    size="small"
+                    sx={{
+                      mb: 1,
+                      backgroundColor: 'rgba(255, 107, 107, 0.2)',
+                      border: '1px solid #ff6b6b',
+                      color: '#ff6b6b'
+                    }}
+                  />
+                  <Stack spacing={0.5} sx={{ mt: 1 }}>
+                    <Typography variant="caption" color="text.primary">
+                      <strong>Depth:</strong> {selectedEarthquake.depth.toFixed(1)} km
+                    </Typography>
+                    <Typography variant="caption" color="text.primary">
+                      <strong>Time:</strong> {new Date(selectedEarthquake.time).toLocaleString()}
+                    </Typography>
+                    {selectedEarthquake.tsunami === 1 && (
+                      <Chip label="TSUNAMI WARNING" color="error" size="small" sx={{ mt: 0.5 }} />
+                    )}
+                  </Stack>
+                </Box>
+              </Popup>
+            )}
+          </Map>
         </Card>
       </motion.div>
 
-      {selectedLocation && (
+      {/* Homeowner Assistance Applicants Table */}
+      {homeowners.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
         >
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Selected Location: {selectedLocation.name}
+                Homeowner Assistance Applicants ({homeowners.length})
               </Typography>
-              <Typography variant="body1" color="text.secondary">
-                {selectedLocation.description}
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Click a row to highlight the location on the map
               </Typography>
-              <Box sx={{ mt: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
-                <Typography variant="body2">
-                  <strong>Status:</strong>
-                </Typography>
-                <Chip
-                  label={selectedLocation.status.toUpperCase()}
-                  color={getStatusChipColor(selectedLocation.status) as any}
-                  size="small"
-                />
-                <Typography variant="body2">
-                  <strong>Active Users:</strong> {selectedLocation.value}
-                </Typography>
-              </Box>
+              <TableContainer component={Paper} sx={{ maxHeight: 400, mt: 2 }}>
+                <Table stickyHeader size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell><strong>ID</strong></TableCell>
+                      <TableCell><strong>Name</strong></TableCell>
+                      <TableCell><strong>Address</strong></TableCell>
+                      <TableCell><strong>Phone</strong></TableCell>
+                      <TableCell><strong>Damage Type</strong></TableCell>
+                      <TableCell><strong>Assistance Needed</strong></TableCell>
+                      <TableCell><strong>Status</strong></TableCell>
+                      <TableCell><strong>Family Size</strong></TableCell>
+                      <TableCell><strong>Est. Damage</strong></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {homeowners.map((homeowner) => (
+                      <TableRow
+                        key={homeowner.id}
+                        ref={(el) => (tableRowRefs.current[homeowner.id] = el)}
+                        hover
+                        onClick={() => handleHomeownerRowClick(homeowner)}
+                        sx={{
+                          cursor: 'pointer',
+                          backgroundColor: selectedHomeowner?.id === homeowner.id ? 'rgba(76, 175, 80, 0.1)' : 'inherit',
+                          '&:hover': {
+                            backgroundColor: 'rgba(33, 150, 243, 0.08)',
+                          },
+                        }}
+                      >
+                        <TableCell
+                          onClick={(e) => handleOpenDetails(homeowner, e)}
+                          sx={{
+                            color: 'primary.main',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            '&:hover': {
+                              textDecoration: 'underline',
+                            },
+                          }}
+                        >
+                          {homeowner.id}
+                        </TableCell>
+                        <TableCell>{homeowner.name}</TableCell>
+                        <TableCell>{homeowner.address}</TableCell>
+                        <TableCell>{homeowner.phone}</TableCell>
+                        <TableCell>{homeowner.damage_type}</TableCell>
+                        <TableCell>{homeowner.assistance_requested}</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={homeowner.status}
+                            size="small"
+                            color={
+                              homeowner.status === 'Approved' ? 'success' :
+                              homeowner.status === 'Under Review' ? 'warning' :
+                              homeowner.status === 'Pending' ? 'default' :
+                              homeowner.status === 'Rejected' ? 'error' : 'info'
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>{homeowner.family_size}</TableCell>
+                        <TableCell>${homeowner.estimated_damage.toLocaleString()}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             </CardContent>
           </Card>
         </motion.div>
       )}
+
+      {/* Homeowner Details Dialog */}
+      <Dialog
+        open={detailsDialogOpen}
+        onClose={handleCloseDetails}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            background: theme.palette.mode === 'dark'
+              ? 'linear-gradient(to bottom right, #1e293b, #0f172a)'
+              : 'linear-gradient(to bottom right, #ffffff, #f0f9ff)',
+          }
+        }}
+      >
+        {detailsHomeowner && (
+          <>
+            <DialogTitle sx={{ pb: 1 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box>
+                  <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
+                    Assistance Case Details
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Application ID: {detailsHomeowner.id}
+                  </Typography>
+                </Box>
+                <Button
+                  onClick={handleCloseDetails}
+                  sx={{ minWidth: 'auto', p: 1 }}
+                  color="inherit"
+                >
+                  <CloseIcon />
+                </Button>
+              </Box>
+            </DialogTitle>
+            <Divider />
+            <DialogContent sx={{ pt: 3 }}>
+              <Grid container spacing={3}>
+                <Grid item xs={12}>
+                  <Box sx={{
+                    background: `linear-gradient(135deg, ${getHomeownerStatusColor(detailsHomeowner.status)}22, ${getHomeownerStatusColor(detailsHomeowner.status)}11)`,
+                    border: `2px solid ${getHomeownerStatusColor(detailsHomeowner.status)}`,
+                    borderRadius: 2,
+                    p: 2,
+                    mb: 2
+                  }}>
+                    <Typography variant="overline" color="text.secondary">
+                      Application Status
+                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                      <Chip
+                        label={detailsHomeowner.status}
+                        sx={{
+                          backgroundColor: getHomeownerStatusColor(detailsHomeowner.status),
+                          color: 'white',
+                          fontWeight: 700
+                        }}
+                      />
+                      <Typography variant="body2" color="text.secondary">
+                        Applied: {new Date(detailsHomeowner.application_date).toLocaleDateString()}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Typography variant="overline" color="text.secondary">
+                    Applicant Information
+                  </Typography>
+                  <Stack spacing={1.5} sx={{ mt: 1 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Name</Typography>
+                      <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                        {detailsHomeowner.name}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Phone</Typography>
+                      <Typography variant="body1">{detailsHomeowner.phone}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Address</Typography>
+                      <Typography variant="body1">{detailsHomeowner.address}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Family Size</Typography>
+                      <Typography variant="body1">{detailsHomeowner.family_size} members</Typography>
+                    </Box>
+                  </Stack>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Typography variant="overline" color="text.secondary">
+                    Damage Assessment
+                  </Typography>
+                  <Stack spacing={1.5} sx={{ mt: 1 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Damage Type</Typography>
+                      <Chip
+                        label={detailsHomeowner.damage_type}
+                        size="small"
+                        color="warning"
+                        sx={{ mt: 0.5 }}
+                      />
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Estimated Damage</Typography>
+                      <Typography variant="h6" sx={{ color: 'error.main', fontWeight: 700 }}>
+                        ${detailsHomeowner.estimated_damage.toLocaleString()}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Assistance Requested</Typography>
+                      <Typography variant="body1">{detailsHomeowner.assistance_requested}</Typography>
+                    </Box>
+                  </Stack>
+                </Grid>
+
+                <Grid item xs={12}>
+                  <Divider sx={{ my: 1 }} />
+                  <Typography variant="overline" color="text.secondary">
+                    Location Details
+                  </Typography>
+                  <Stack spacing={1} sx={{ mt: 1 }}>
+                    <Box sx={{ display: 'flex', gap: 2 }}>
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">Latitude</Typography>
+                        <Typography variant="body2">{detailsHomeowner.latitude.toFixed(6)}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">Longitude</Typography>
+                        <Typography variant="body2">{detailsHomeowner.longitude.toFixed(6)}</Typography>
+                      </Box>
+                    </Box>
+                  </Stack>
+                </Grid>
+              </Grid>
+            </DialogContent>
+            <Divider />
+            <DialogActions sx={{ p: 2 }}>
+              <Button onClick={handleCloseDetails} variant="outlined">
+                Close
+              </Button>
+              <Button
+                variant="contained"
+                onClick={() => {
+                  handleHomeownerRowClick(detailsHomeowner)
+                  handleCloseDetails()
+                }}
+              >
+                View on Map
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
     </Box>
   )
 }
