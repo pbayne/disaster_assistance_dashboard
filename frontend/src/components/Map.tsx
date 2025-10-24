@@ -1,8 +1,11 @@
 import { useEffect, useState, useRef } from 'react'
 import Map, { Marker, Popup, NavigationControl, Layer, Source } from 'react-map-gl/maplibre'
-import { Box, Card, CardContent, Typography, Stack, Chip, ToggleButtonGroup, ToggleButton, Slider, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, useTheme, Dialog, DialogTitle, DialogContent, DialogActions, Button, Divider, Grid } from '@mui/material'
+import { Box, Card, CardContent, Typography, Stack, Chip, ToggleButtonGroup, ToggleButton, Slider, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, useTheme, Dialog, DialogTitle, DialogContent, DialogActions, Button, Divider, Grid, FormControl, InputLabel, Select, MenuItem, TableSortLabel, TextField, IconButton } from '@mui/material'
 import HomeIcon from '@mui/icons-material/Home'
 import CloseIcon from '@mui/icons-material/Close'
+import ClearIcon from '@mui/icons-material/Clear'
+import WarningIcon from '@mui/icons-material/Warning'
+import ErrorIcon from '@mui/icons-material/Error'
 import { motion } from 'framer-motion'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import '../map-popup.css'
@@ -33,6 +36,15 @@ interface HomeownerApplicant {
   application_date: string
   family_size: number
   estimated_damage: number
+  estimated_property_value: number
+  damage_percentage: number
+  fraud_indicators: string[]
+  has_fraud_flag: boolean
+  missing_documents: string[]
+  next_steps: string[]
+  risk_score: number
+  inspector_assigned: boolean
+  inspector_name: string | null
 }
 
 // Get API base URL based on environment
@@ -82,6 +94,15 @@ export default function MapComponent() {
     latitude: 39.8283,
     zoom: 3.5
   })
+
+  // Sorting and filtering state
+  const [sortColumn, setSortColumn] = useState<string>('id')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [filterDamageType, setFilterDamageType] = useState<string>('all')
+  const [filterAssistanceType, setFilterAssistanceType] = useState<string>('all')
+  const [searchQuery, setSearchQuery] = useState<string>('')
+
   const tableRowRefs = useRef<{ [key: string]: HTMLTableRowElement | null }>({})
   const mapRef = useRef<any>(null)
 
@@ -238,6 +259,73 @@ export default function MapComponent() {
     })
   }
 
+  // Sorting and filtering logic
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortColumn(column)
+      setSortDirection('asc')
+    }
+  }
+
+  const clearFilters = () => {
+    setFilterStatus('all')
+    setFilterDamageType('all')
+    setFilterAssistanceType('all')
+    setSearchQuery('')
+  }
+
+  // Get filtered and sorted homeowners
+  const getFilteredAndSortedHomeowners = () => {
+    let filtered = [...homeowners]
+
+    // Apply filters
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter(h => h.status === filterStatus)
+    }
+    if (filterDamageType !== 'all') {
+      filtered = filtered.filter(h => h.damage_type === filterDamageType)
+    }
+    if (filterAssistanceType !== 'all') {
+      filtered = filtered.filter(h => h.assistance_requested === filterAssistanceType)
+    }
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      filtered = filtered.filter(h =>
+        h.id.toLowerCase().includes(query) ||
+        h.name.toLowerCase().includes(query) ||
+        h.address.toLowerCase().includes(query) ||
+        h.phone.includes(query)
+      )
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      let aValue: any = a[sortColumn as keyof HomeownerApplicant]
+      let bValue: any = b[sortColumn as keyof HomeownerApplicant]
+
+      // Handle numeric sorting
+      if (sortColumn === 'estimated_damage' || sortColumn === 'family_size') {
+        aValue = Number(aValue)
+        bValue = Number(bValue)
+      }
+
+      if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1
+      if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1
+      return 0
+    })
+
+    return filtered
+  }
+
+  const filteredHomeowners = getFilteredAndSortedHomeowners()
+
+  // Get unique values for filters
+  const uniqueStatuses = Array.from(new Set(homeowners.map(h => h.status)))
+  const uniqueDamageTypes = Array.from(new Set(homeowners.map(h => h.damage_type)))
+  const uniqueAssistanceTypes = Array.from(new Set(homeowners.map(h => h.assistance_requested)))
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
       <motion.div
@@ -247,7 +335,9 @@ export default function MapComponent() {
       >
         <Box
           sx={{
-            background: 'linear-gradient(135deg, #FF3621 0%, #FF8C00 100%)',
+            background: theme.palette.mode === 'dark'
+              ? 'linear-gradient(135deg, #006699 0%, #003366 100%)'
+              : 'linear-gradient(135deg, #003366 0%, #006699 100%)',
             borderRadius: 3,
             p: 3,
             mb: 2,
@@ -280,7 +370,9 @@ export default function MapComponent() {
             <Stack spacing={2}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="h6" sx={{
-                  background: 'linear-gradient(135deg, #FF3621, #FF8C00)',
+                  background: theme.palette.mode === 'dark'
+                    ? 'linear-gradient(135deg, #006699, #89d1d6)'
+                    : 'linear-gradient(135deg, #003366, #006699)',
                   backgroundClip: 'text',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
@@ -505,29 +597,152 @@ export default function MapComponent() {
         >
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Homeowner Assistance Applicants ({homeowners.length})
-              </Typography>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                Click a row to highlight the location on the map
-              </Typography>
-              <TableContainer component={Paper} sx={{ maxHeight: 400, mt: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Box>
+                  <Typography variant="h6" gutterBottom>
+                    Homeowner Assistance Applicants ({filteredHomeowners.length} of {homeowners.length})
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Click column headers to sort • Click a row to highlight on the map
+                  </Typography>
+                </Box>
+                <IconButton onClick={clearFilters} size="small" title="Clear all filters">
+                  <ClearIcon />
+                </IconButton>
+              </Box>
+
+              {/* Filter Controls */}
+              <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+                <TextField
+                  size="small"
+                  label="Search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="ID, Name, Address, Phone..."
+                  sx={{ minWidth: 250 }}
+                />
+                <FormControl size="small" sx={{ minWidth: 150 }}>
+                  <InputLabel>Status</InputLabel>
+                  <Select
+                    value={filterStatus}
+                    label="Status"
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                  >
+                    <MenuItem value="all">All Statuses</MenuItem>
+                    {uniqueStatuses.map(status => (
+                      <MenuItem key={status} value={status}>{status}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 150 }}>
+                  <InputLabel>Damage Type</InputLabel>
+                  <Select
+                    value={filterDamageType}
+                    label="Damage Type"
+                    onChange={(e) => setFilterDamageType(e.target.value)}
+                  >
+                    <MenuItem value="all">All Types</MenuItem>
+                    {uniqueDamageTypes.map(type => (
+                      <MenuItem key={type} value={type}>{type}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 180 }}>
+                  <InputLabel>Assistance Type</InputLabel>
+                  <Select
+                    value={filterAssistanceType}
+                    label="Assistance Type"
+                    onChange={(e) => setFilterAssistanceType(e.target.value)}
+                  >
+                    <MenuItem value="all">All Assistance</MenuItem>
+                    {uniqueAssistanceTypes.map(type => (
+                      <MenuItem key={type} value={type}>{type}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
+
+              <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
                 <Table stickyHeader size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell><strong>ID</strong></TableCell>
-                      <TableCell><strong>Name</strong></TableCell>
-                      <TableCell><strong>Address</strong></TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={sortColumn === 'id'}
+                          direction={sortColumn === 'id' ? sortDirection : 'asc'}
+                          onClick={() => handleSort('id')}
+                        >
+                          <strong>ID</strong>
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={sortColumn === 'name'}
+                          direction={sortColumn === 'name' ? sortDirection : 'asc'}
+                          onClick={() => handleSort('name')}
+                        >
+                          <strong>Name</strong>
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={sortColumn === 'address'}
+                          direction={sortColumn === 'address' ? sortDirection : 'asc'}
+                          onClick={() => handleSort('address')}
+                        >
+                          <strong>Address</strong>
+                        </TableSortLabel>
+                      </TableCell>
                       <TableCell><strong>Phone</strong></TableCell>
-                      <TableCell><strong>Damage Type</strong></TableCell>
-                      <TableCell><strong>Assistance Needed</strong></TableCell>
-                      <TableCell><strong>Status</strong></TableCell>
-                      <TableCell><strong>Family Size</strong></TableCell>
-                      <TableCell><strong>Est. Damage</strong></TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={sortColumn === 'damage_type'}
+                          direction={sortColumn === 'damage_type' ? sortDirection : 'asc'}
+                          onClick={() => handleSort('damage_type')}
+                        >
+                          <strong>Damage Type</strong>
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={sortColumn === 'assistance_requested'}
+                          direction={sortColumn === 'assistance_requested' ? sortDirection : 'asc'}
+                          onClick={() => handleSort('assistance_requested')}
+                        >
+                          <strong>Assistance Needed</strong>
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={sortColumn === 'status'}
+                          direction={sortColumn === 'status' ? sortDirection : 'asc'}
+                          onClick={() => handleSort('status')}
+                        >
+                          <strong>Status</strong>
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={sortColumn === 'family_size'}
+                          direction={sortColumn === 'family_size' ? sortDirection : 'asc'}
+                          onClick={() => handleSort('family_size')}
+                        >
+                          <strong>Family Size</strong>
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={sortColumn === 'estimated_damage'}
+                          direction={sortColumn === 'estimated_damage' ? sortDirection : 'asc'}
+                          onClick={() => handleSort('estimated_damage')}
+                        >
+                          <strong>Est. Damage</strong>
+                        </TableSortLabel>
+                      </TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {homeowners.map((homeowner) => (
+                    {filteredHomeowners.map((homeowner) => (
                       <TableRow
                         key={homeowner.id}
                         ref={(el) => (tableRowRefs.current[homeowner.id] = el)}
@@ -552,7 +767,15 @@ export default function MapComponent() {
                             },
                           }}
                         >
-                          {homeowner.id}
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            {homeowner.id}
+                            {homeowner.has_fraud_flag && (
+                              <ErrorIcon sx={{ fontSize: 16, color: '#cc1f36' }} titleAccess="Fraud indicators detected" />
+                            )}
+                            {homeowner.risk_score >= 70 && !homeowner.has_fraud_flag && (
+                              <WarningIcon sx={{ fontSize: 16, color: '#f59e0b' }} titleAccess="High risk score" />
+                            )}
+                          </Box>
                         </TableCell>
                         <TableCell>{homeowner.name}</TableCell>
                         <TableCell>{homeowner.address}</TableCell>
@@ -696,11 +919,122 @@ export default function MapComponent() {
                       </Typography>
                     </Box>
                     <Box>
+                      <Typography variant="caption" color="text.secondary">Property Value</Typography>
+                      <Typography variant="body1">${detailsHomeowner.estimated_property_value.toLocaleString()}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Damage Percentage</Typography>
+                      <Typography variant="body1" sx={{ fontWeight: 600, color: detailsHomeowner.damage_percentage > 60 ? 'error.main' : 'text.primary' }}>
+                        {detailsHomeowner.damage_percentage}%
+                      </Typography>
+                    </Box>
+                    <Box>
                       <Typography variant="caption" color="text.secondary">Assistance Requested</Typography>
                       <Typography variant="body1">{detailsHomeowner.assistance_requested}</Typography>
                     </Box>
                   </Stack>
                 </Grid>
+
+                {/* Risk Assessment */}
+                <Grid item xs={12}>
+                  <Divider sx={{ my: 1 }} />
+                  <Typography variant="overline" color="text.secondary">
+                    Risk Assessment
+                  </Typography>
+                  <Box sx={{ mt: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                      <Typography variant="caption" color="text.secondary">Risk Score</Typography>
+                      <Chip
+                        label={`${detailsHomeowner.risk_score}/100`}
+                        size="small"
+                        sx={{
+                          backgroundColor:
+                            detailsHomeowner.risk_score >= 70 ? '#cc1f36' :
+                            detailsHomeowner.risk_score >= 40 ? '#f59e0b' : '#10b981',
+                          color: 'white',
+                          fontWeight: 700
+                        }}
+                      />
+                      {detailsHomeowner.inspector_assigned && (
+                        <Chip
+                          label={`Inspector: ${detailsHomeowner.inspector_name || 'Assigned'}`}
+                          size="small"
+                          color="info"
+                          variant="outlined"
+                        />
+                      )}
+                    </Box>
+                  </Box>
+                </Grid>
+
+                {/* Fraud Indicators */}
+                {detailsHomeowner.has_fraud_flag && detailsHomeowner.fraud_indicators.length > 0 && (
+                  <Grid item xs={12}>
+                    <Box sx={{
+                      backgroundColor: 'rgba(204, 31, 54, 0.1)',
+                      border: '2px solid #cc1f36',
+                      borderRadius: 2,
+                      p: 2
+                    }}>
+                      <Typography variant="overline" sx={{ color: '#cc1f36', fontWeight: 700 }}>
+                        ⚠️ Fraud Indicators Detected
+                      </Typography>
+                      <Stack spacing={0.5} sx={{ mt: 1 }}>
+                        {detailsHomeowner.fraud_indicators.map((indicator, idx) => (
+                          <Typography key={idx} variant="body2" sx={{ color: '#cc1f36' }}>
+                            • {indicator}
+                          </Typography>
+                        ))}
+                      </Stack>
+                    </Box>
+                  </Grid>
+                )}
+
+                {/* Missing Documents */}
+                {detailsHomeowner.missing_documents.length > 0 && (
+                  <Grid item xs={12}>
+                    <Box sx={{
+                      backgroundColor: theme.palette.mode === 'dark' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(245, 158, 11, 0.05)',
+                      border: '2px solid #f59e0b',
+                      borderRadius: 2,
+                      p: 2
+                    }}>
+                      <Typography variant="overline" sx={{ color: '#f59e0b', fontWeight: 700 }}>
+                        📄 Missing Documents ({detailsHomeowner.missing_documents.length})
+                      </Typography>
+                      <Stack spacing={0.5} sx={{ mt: 1 }}>
+                        {detailsHomeowner.missing_documents.map((doc, idx) => (
+                          <Typography key={idx} variant="body2">
+                            • {doc}
+                          </Typography>
+                        ))}
+                      </Stack>
+                    </Box>
+                  </Grid>
+                )}
+
+                {/* Next Steps */}
+                {detailsHomeowner.next_steps.length > 0 && (
+                  <Grid item xs={12}>
+                    <Box sx={{
+                      backgroundColor: theme.palette.mode === 'dark' ? 'rgba(0, 102, 153, 0.1)' : 'rgba(0, 102, 153, 0.05)',
+                      border: '2px solid #006699',
+                      borderRadius: 2,
+                      p: 2
+                    }}>
+                      <Typography variant="overline" sx={{ color: '#006699', fontWeight: 700 }}>
+                        📋 Next Steps
+                      </Typography>
+                      <Stack spacing={0.5} sx={{ mt: 1 }}>
+                        {detailsHomeowner.next_steps.map((step, idx) => (
+                          <Typography key={idx} variant="body2">
+                            {idx + 1}. {step}
+                          </Typography>
+                        ))}
+                      </Stack>
+                    </Box>
+                  </Grid>
+                )}
 
                 <Grid item xs={12}>
                   <Divider sx={{ my: 1 }} />

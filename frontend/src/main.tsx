@@ -22,14 +22,14 @@ function AppWrapper() {
   palette: {
     mode,
     primary: {
-      main: '#FF3621', // Databricks red-orange
-      light: '#FF5C47',
-      dark: '#E62E1A',
+      main: mode === 'dark' ? '#006699' : '#003366', // FEMA Blue (lighter in dark mode)
+      light: '#006699',
+      dark: '#002244',
     },
     secondary: {
-      main: '#FF6F3C', // Bright orange
-      light: '#FF8C5C',
-      dark: '#F05A28',
+      main: '#89d1d6', // FEMA Light Blue
+      light: '#a8dde1',
+      dark: '#6ab4ba',
     },
     success: {
       main: '#10b981', // Emerald
@@ -37,22 +37,22 @@ function AppWrapper() {
       dark: '#059669',
     },
     warning: {
-      main: '#FF8C00', // Dark orange
-      light: '#FFA500',
-      dark: '#FF7700',
+      main: '#f59e0b', // Amber
+      light: '#fbbf24',
+      dark: '#d97706',
     },
     error: {
-      main: '#ef4444', // Red
-      light: '#f87171',
-      dark: '#dc2626',
+      main: '#cc1f36', // FEMA Red
+      light: '#e63946',
+      dark: '#a31729',
     },
     info: {
-      main: '#00A7E1', // Databricks blue
-      light: '#33BCEB',
-      dark: '#0089C7',
+      main: '#006699', // FEMA Blue (lighter)
+      light: '#89d1d6',
+      dark: '#003366',
     },
     background: {
-      default: mode === 'dark' ? '#0f172a' : '#f8fafc',
+      default: mode === 'dark' ? '#0f172a' : '#f3f4f6',
       paper: mode === 'dark' ? '#1e293b' : '#ffffff',
     },
   },

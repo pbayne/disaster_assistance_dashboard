@@ -165,6 +165,76 @@ async def generate_homeowner_applicants(latitude: float, longitude: float, radiu
         street_name = random.choice(street_names)
         street_type = random.choice(street_types)
 
+        # Generate property value and damage assessment
+        estimated_damage = random.randint(5000, 150000)
+        estimated_property_value = random.randint(100000, 500000)
+        damage_percentage = (estimated_damage / estimated_property_value) * 100
+
+        # Fraud detection flags
+        fraud_indicators = []
+        has_fraud_flag = False
+
+        # Check for suspicious damage claims (claiming more than property is worth)
+        if estimated_damage > estimated_property_value * 0.8:
+            fraud_indicators.append("Damage claim exceeds 80% of property value")
+            has_fraud_flag = True
+
+        # Random additional fraud checks
+        if random.random() < 0.15:  # 15% chance of duplicate application flag
+            fraud_indicators.append("Possible duplicate application detected")
+            has_fraud_flag = True
+
+        if random.random() < 0.1:  # 10% chance of address verification issue
+            fraud_indicators.append("Address verification failed")
+            has_fraud_flag = True
+
+        if random.random() < 0.12:  # 12% chance of income inconsistency
+            fraud_indicators.append("Income documentation inconsistent with claim")
+            has_fraud_flag = True
+
+        # Missing documents
+        missing_documents = []
+        if random.random() < 0.3:
+            missing_documents.append("Proof of ownership")
+        if random.random() < 0.25:
+            missing_documents.append("Insurance documentation")
+        if random.random() < 0.2:
+            missing_documents.append("Photo evidence of damage")
+        if random.random() < 0.35:
+            missing_documents.append("Repair estimates from licensed contractor")
+        if random.random() < 0.15:
+            missing_documents.append("Income verification")
+
+        # Next steps based on status
+        next_steps = []
+        status = random.choice(statuses)
+
+        if status == "Pending":
+            next_steps = ["Complete initial application review", "Verify applicant identity", "Schedule property inspection"]
+        elif status == "Under Review":
+            if missing_documents:
+                next_steps = [f"Request missing documents: {', '.join(missing_documents)}", "Conduct fraud assessment", "Review damage estimates"]
+            else:
+                next_steps = ["Conduct fraud assessment", "Review damage estimates", "Verify property ownership"]
+        elif status == "Approved":
+            next_steps = ["Issue assistance payment", "Schedule follow-up inspection", "Close case"]
+        elif status == "Processing":
+            next_steps = ["Finalize payment amount", "Coordinate with insurance provider", "Schedule disbursement"]
+        elif status == "Rejected":
+            rejection_reasons = ["Insufficient damage evidence", "Duplicate application", "Property not primary residence", "Fraudulent information detected"]
+            next_steps = [f"Reason: {random.choice(rejection_reasons)}", "Applicant may appeal within 30 days"]
+
+        # Risk score (0-100, higher = more risk)
+        risk_score = 0
+        if has_fraud_flag:
+            risk_score += 40
+        if len(missing_documents) > 2:
+            risk_score += 20
+        if damage_percentage > 60:
+            risk_score += 15
+        risk_score += random.randint(0, 25)
+        risk_score = min(risk_score, 100)
+
         applicant = {
             "id": f"APP-{1000 + i}",
             "name": f"{random.choice(first_names)} {random.choice(last_names)}",
@@ -174,10 +244,19 @@ async def generate_homeowner_applicants(latitude: float, longitude: float, radiu
             "phone": f"({random.randint(200,999)}) {random.randint(200,999)}-{random.randint(1000,9999)}",
             "damage_type": random.choice(damage_types),
             "assistance_requested": random.choice(assistance_types),
-            "status": random.choice(statuses),
+            "status": status,
             "application_date": datetime.utcnow().isoformat(),
             "family_size": random.randint(1, 6),
-            "estimated_damage": random.randint(5000, 150000)
+            "estimated_damage": estimated_damage,
+            "estimated_property_value": estimated_property_value,
+            "damage_percentage": round(damage_percentage, 1),
+            "fraud_indicators": fraud_indicators,
+            "has_fraud_flag": has_fraud_flag,
+            "missing_documents": missing_documents,
+            "next_steps": next_steps,
+            "risk_score": risk_score,
+            "inspector_assigned": random.choice([True, False]) if status in ["Under Review", "Processing"] else False,
+            "inspector_name": f"{random.choice(first_names)} {random.choice(last_names)}" if random.choice([True, False]) and status in ["Under Review", "Processing"] else None
         }
 
         applicants.append(applicant)
