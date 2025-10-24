@@ -22,32 +22,46 @@ def get_databricks_connection():
     Create a connection to Databricks SQL Warehouse
     Uses environment variables or Databricks Apps authentication
     """
-    # In Databricks Apps, authentication is handled automatically
-    # through the app's service principal
-    server_hostname = os.getenv("DATABRICKS_SERVER_HOSTNAME")
     http_path = f"/sql/1.0/warehouses/{SQL_WAREHOUSE_ID}"
 
-    # When running in Databricks Apps, use OAuth for machine-to-machine
+    # Try to get server hostname from various environment variables
+    server_hostname = os.getenv("DATABRICKS_SERVER_HOSTNAME")
     if not server_hostname:
-        # Try to extract from workspace URL
         workspace_url = os.getenv("DATABRICKS_HOST")
         if workspace_url:
-            server_hostname = workspace_url.replace("https://", "")
+            server_hostname = workspace_url.replace("https://", "").replace("http://", "")
 
-    # For local development, use token authentication
+    # In Databricks Apps, try OAuth M2M first
+    client_id = os.getenv("DATABRICKS_CLIENT_ID")
+    client_secret = os.getenv("DATABRICKS_CLIENT_SECRET")
+
+    if client_id and client_secret and server_hostname:
+        logger.info(f"Using OAuth M2M authentication for {server_hostname}")
+        try:
+            return sql.connect(
+                server_hostname=server_hostname,
+                http_path=http_path,
+                client_id=client_id,
+                client_secret=client_secret
+            )
+        except Exception as e:
+            logger.error(f"OAuth M2M connection failed: {e}")
+
+    # Fall back to token authentication for local development
     access_token = os.getenv("DATABRICKS_TOKEN")
-
     if access_token and server_hostname:
-        return sql.connect(
-            server_hostname=server_hostname,
-            http_path=http_path,
-            access_token=access_token
-        )
-    else:
-        # In production Databricks Apps environment
-        # The connection will use the app's service principal automatically
-        logger.info("Using Databricks Apps authentication")
-        return None  # Will be handled by the app runtime
+        logger.info(f"Using token authentication for {server_hostname}")
+        try:
+            return sql.connect(
+                server_hostname=server_hostname,
+                http_path=http_path,
+                access_token=access_token
+            )
+        except Exception as e:
+            logger.error(f"Token authentication failed: {e}")
+
+    logger.warning("No valid Databricks credentials found - database operations will be skipped")
+    return None
 
 @contextmanager
 def get_cursor():
