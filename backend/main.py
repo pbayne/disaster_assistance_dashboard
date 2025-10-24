@@ -9,6 +9,7 @@ import httpx
 import random
 import math
 from dotenv import load_dotenv
+import db
 
 load_dotenv()
 
@@ -17,6 +18,12 @@ app = FastAPI(
     description="FastAPI backend for Disaster Assistance Dashboard - Earthquake monitoring and homeowner assistance tracking",
     version="1.0.0",
 )
+
+# Initialize database schema on startup
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database schema when app starts"""
+    db.initialize_schema()
 
 # CORS middleware for local development
 app.add_middleware(
@@ -84,7 +91,7 @@ async def get_earthquakes(timeframe: str = "hour", min_magnitude: float = 2.5):
                 coords = feature.get("geometry", {}).get("coordinates", [])
 
                 if len(coords) >= 3:
-                    earthquakes.append({
+                    earthquake = {
                         "id": feature.get("id"),
                         "magnitude": props.get("mag"),
                         "place": props.get("place"),
@@ -98,7 +105,14 @@ async def get_earthquakes(timeframe: str = "hour", min_magnitude: float = 2.5):
                         "felt": props.get("felt"),
                         "tsunami": props.get("tsunami", 0),
                         "type": props.get("type"),
-                    })
+                    }
+                    earthquakes.append(earthquake)
+
+                    # Save to database (non-blocking)
+                    try:
+                        db.save_earthquake_event(earthquake)
+                    except Exception as e:
+                        print(f"Warning: Failed to save earthquake to database: {e}")
 
             return {
                 "count": len(earthquakes),
@@ -260,6 +274,12 @@ async def generate_homeowner_applicants(latitude: float, longitude: float, radiu
         }
 
         applicants.append(applicant)
+
+        # Save to database (non-blocking, continues even if DB save fails)
+        try:
+            db.save_homeowner_application(applicant)
+        except Exception as e:
+            print(f"Warning: Failed to save application to database: {e}")
 
     return {
         "count": len(applicants),
