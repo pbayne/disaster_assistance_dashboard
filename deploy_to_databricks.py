@@ -36,7 +36,7 @@ class DatabricksDeployer:
         self.workspace_url = None
         self.token = None
         self.user_email = None
-        self.app_name = "dbapps-project"
+        self.app_name = "disaster-assistance"
         self.app_folder = None  # Will be auto-detected
 
         # Auto-detect workspace info
@@ -609,7 +609,7 @@ class DatabricksDeployer:
 
 def main():
     parser = argparse.ArgumentParser(description="Deploy app to Databricks")
-    parser.add_argument("--app-name", default="dbapps-project", help="App name")
+    parser.add_argument("--app-name", default="disaster-assistance", help="App name")
     parser.add_argument("--app-folder", default=None, help="App folder in workspace (auto-detected if not provided)")
     parser.add_argument("--hard-redeploy", action="store_true", help="Hard redeploy: delete existing app, wait for deletion, then redeploy")
 

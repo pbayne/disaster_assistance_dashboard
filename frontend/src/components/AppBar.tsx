@@ -50,7 +50,7 @@ export default function AppBarComponent({
           <MenuIcon />
         </IconButton>
         <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-          Disaster Assistance Dashboard
+          Disaster Assistance
         </Typography>
         <IconButton
           sx={{ mr: 1 }}

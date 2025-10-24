@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Background circle with gradient -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF3621;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FF8C00;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="50" cy="50" r="48" fill="url(#bgGradient)"/>
+
+  <!-- Warning triangle -->
+  <path d="M 50 25 L 70 60 L 30 60 Z" fill="#FFF" opacity="0.9"/>
+
+  <!-- Exclamation mark -->
+  <rect x="47" y="35" width="6" height="15" rx="2" fill="#FF3621"/>
+  <circle cx="50" cy="55" r="3" fill="#FF3621"/>
+
+  <!-- Helping hand at bottom -->
+  <path d="M 35 70 Q 35 75 40 75 L 50 75 Q 55 75 55 70 L 55 65 L 50 65 L 50 70 L 45 70 L 45 65 L 40 65 Z"
+        fill="#FFF" opacity="0.9"/>
+</svg>
