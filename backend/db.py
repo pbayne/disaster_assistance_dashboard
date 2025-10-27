@@ -190,7 +190,7 @@ def save_homeowner_application(application: Dict[str, Any]) -> bool:
         logger.error(f"Error saving homeowner application: {e}")
         return False
 
-def get_homeowner_applications(earthquake_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_homeowner_applications(earthquake_id: Optional[str] = None, status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
     """Retrieve homeowner applications from database"""
     try:
         with get_cursor() as cursor:
@@ -215,6 +215,10 @@ def get_homeowner_applications(earthquake_id: Optional[str] = None) -> List[Dict
                 query += " AND ha.earthquake_id = %(earthquake_id)s"
                 params['earthquake_id'] = earthquake_id
 
+            if status_filter:
+                query += " AND ha.status = %(status)s"
+                params['status'] = status_filter
+
             query += " GROUP BY ha.id"
 
             cursor.execute(query, params)
@@ -226,3 +230,105 @@ def get_homeowner_applications(earthquake_id: Optional[str] = None) -> List[Dict
     except Exception as e:
         logger.error(f"Error retrieving homeowner applications: {e}")
         return []
+
+def update_application_approval(
+    application_id: str,
+    approval_action: str,
+    approval_comment: str,
+    approver_name: str
+) -> bool:
+    """Update application approval status"""
+    try:
+        with get_cursor() as cursor:
+            if cursor is None:
+                return False
+
+            # Determine status based on action
+            if approval_action == "approve":
+                new_status = "Approved"
+            elif approval_action == "reject":
+                new_status = "Rejected"
+            else:  # request_more_info
+                new_status = "Under Review"
+
+            cursor.execute(f"""
+                UPDATE {CATALOG}.{SCHEMA}.homeowner_applications
+                SET
+                    status = %(status)s,
+                    approval_action = %(approval_action)s,
+                    approval_comment = %(approval_comment)s,
+                    approver_name = %(approver_name)s,
+                    approval_date = CURRENT_TIMESTAMP(),
+                    updated_at = CURRENT_TIMESTAMP()
+                WHERE id = %(application_id)s
+            """, {
+                'application_id': application_id,
+                'status': new_status,
+                'approval_action': approval_action,
+                'approval_comment': approval_comment,
+                'approver_name': approver_name
+            })
+            return True
+    except Exception as e:
+        logger.error(f"Error updating application approval: {e}")
+        return False
+
+def get_application_by_id(application_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve a single application by ID"""
+    try:
+        with get_cursor() as cursor:
+            if cursor is None:
+                return None
+
+            query = f"""
+                SELECT
+                    ha.*,
+                    COLLECT_LIST(DISTINCT fi.indicator) as fraud_indicators,
+                    COLLECT_LIST(DISTINCT md.document_name) as missing_documents,
+                    COLLECT_LIST(STRUCT(ns.step_order, ns.step_description)) as next_steps
+                FROM {CATALOG}.{SCHEMA}.homeowner_applications ha
+                LEFT JOIN {CATALOG}.{SCHEMA}.fraud_indicators fi ON ha.id = fi.application_id
+                LEFT JOIN {CATALOG}.{SCHEMA}.missing_documents md ON ha.id = md.application_id
+                LEFT JOIN {CATALOG}.{SCHEMA}.next_steps ns ON ha.id = ns.application_id
+                WHERE ha.id = %(application_id)s
+                GROUP BY ha.id
+            """
+
+            cursor.execute(query, {'application_id': application_id})
+            result = cursor.fetchone()
+
+            if result:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, result))
+            return None
+    except Exception as e:
+        logger.error(f"Error retrieving application by ID: {e}")
+        return None
+
+def submit_applicant_response(
+    application_id: str,
+    response: str
+) -> bool:
+    """Submit applicant's response to reviewer's request for more information"""
+    try:
+        with get_cursor() as cursor:
+            if cursor is None:
+                return False
+
+            cursor.execute(f"""
+                UPDATE {CATALOG}.{SCHEMA}.homeowner_applications
+                SET
+                    status = 'Ready for Review',
+                    applicant_response = %(response)s,
+                    applicant_response_date = CURRENT_TIMESTAMP(),
+                    updated_at = CURRENT_TIMESTAMP()
+                WHERE id = %(application_id)s
+                  AND status = 'Under Review'
+            """, {
+                'application_id': application_id,
+                'response': response
+            })
+            return True
+    except Exception as e:
+        logger.error(f"Error submitting applicant response: {e}")
+        return False

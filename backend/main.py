@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 import os
@@ -18,6 +19,9 @@ app = FastAPI(
     description="FastAPI backend for Disaster Assistance Dashboard - Earthquake monitoring and homeowner assistance tracking",
     version="1.0.0",
 )
+
+# In-memory storage for approval actions (used when database is not available)
+in_memory_approvals = {}
 
 # Initialize database schema on startup
 @app.on_event("startup")
@@ -127,9 +131,18 @@ async def get_earthquakes(timeframe: str = "hour", min_magnitude: float = 2.5):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
+# Pydantic models for request bodies
+class ApprovalRequest(BaseModel):
+    action: str  # "approve", "reject", "request_more_info"
+    comment: str
+    approver_name: str
+
+class ApplicantResponseRequest(BaseModel):
+    response: str
+
 # Homeowner assistance applicants endpoint
 @app.get("/api/homeowners")
-async def generate_homeowner_applicants(latitude: float, longitude: float, radius_miles: float = 25):
+async def generate_homeowner_applicants(latitude: float, longitude: float, radius_miles: float = 25, status: str = None):
     """
     Generate synthetic homeowner assistance applicant data within a radius
 
@@ -280,6 +293,31 @@ async def generate_homeowner_applicants(latitude: float, longitude: float, radiu
             db.save_homeowner_application(applicant)
         except Exception as e:
             print(f"Warning: Failed to save application to database: {e}")
+
+    # If status filter is provided, filter applicants from database
+    if status:
+        try:
+            db_applicants = db.get_homeowner_applications(status_filter=status)
+            # Filter by location if we have database results
+            filtered_applicants = []
+            for app in db_applicants:
+                # Calculate distance
+                app_lat = app.get('latitude', 0)
+                app_lng = app.get('longitude', 0)
+                distance = math.sqrt((app_lat - latitude)**2 + (app_lng - longitude)**2)
+                radius_deg = radius_miles / 69.0
+                if distance <= radius_deg:
+                    filtered_applicants.append(app)
+
+            if filtered_applicants:
+                return {
+                    "count": len(filtered_applicants),
+                    "center": {"latitude": latitude, "longitude": longitude},
+                    "radius_miles": radius_miles,
+                    "applicants": filtered_applicants
+                }
+        except Exception as e:
+            print(f"Warning: Error filtering by status: {e}")
 
     return {
         "count": len(applicants),
@@ -455,6 +493,202 @@ async def generate_test_data(num_earthquakes: int = 50, num_homeowners: int = 10
         "message": f"Generated {results['earthquakes_generated']} earthquakes and {results['homeowners_generated']} homeowner applications",
         "details": results
     }
+
+# Approval workflow endpoints
+@app.get("/api/applications/{application_id}")
+async def get_application(application_id: str):
+    """
+    Get a single application by ID
+
+    Parameters:
+    - application_id: The application ID
+    """
+    try:
+        # Try getting from database first
+        application = db.get_application_by_id(application_id)
+        if application:
+            # Merge with in-memory approval data if exists
+            if application_id in in_memory_approvals:
+                application.update(in_memory_approvals[application_id])
+            return application
+
+        # If not in database, check if we have it in memory
+        if application_id in in_memory_approvals:
+            return {
+                "id": application_id,
+                **in_memory_approvals[application_id]
+            }
+
+        raise HTTPException(status_code=404, detail=f"Application {application_id} not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving application: {str(e)}")
+
+@app.post("/api/applications/{application_id}/approve")
+async def approve_application(application_id: str, request: ApprovalRequest):
+    """
+    Submit approval action for an application
+
+    Parameters:
+    - application_id: The application ID
+    - request: ApprovalRequest with action, comment, and approver_name
+
+    Actions:
+    - approve: Approve the application
+    - reject: Reject the application
+    - request_more_info: Request more information from the applicant
+    """
+    valid_actions = ["approve", "reject", "request_more_info"]
+
+    if request.action not in valid_actions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid action. Must be one of: {', '.join(valid_actions)}"
+        )
+
+    if not request.comment or not request.comment.strip():
+        raise HTTPException(status_code=400, detail="Comment is required")
+
+    if not request.approver_name or not request.approver_name.strip():
+        raise HTTPException(status_code=400, detail="Approver name is required")
+
+    try:
+        # Try database update first
+        success = db.update_application_approval(
+            application_id=application_id,
+            approval_action=request.action,
+            approval_comment=request.comment.strip(),
+            approver_name=request.approver_name.strip()
+        )
+
+        if success:
+            # Get updated application from database
+            updated_app = db.get_application_by_id(application_id)
+            if updated_app:
+                return {
+                    "success": True,
+                    "message": f"Application {application_id} has been updated with action: {request.action}",
+                    "application": updated_app
+                }
+
+        # If database operation failed or returned no data, use in-memory storage
+        # Determine status based on action
+        if request.action == "approve":
+            new_status = "Approved"
+        elif request.action == "reject":
+            new_status = "Rejected"
+        else:  # request_more_info
+            new_status = "Under Review"
+
+        # Store the approval in memory
+        in_memory_approvals[application_id] = {
+            "status": new_status,
+            "approval_action": request.action,
+            "approval_comment": request.comment.strip(),
+            "approver_name": request.approver_name.strip(),
+            "approval_date": datetime.utcnow().isoformat()
+        }
+
+        # Return a simulated updated application
+        return {
+            "success": True,
+            "message": f"Application {application_id} has been updated with action: {request.action} (stored in memory)",
+            "application": {
+                "id": application_id,
+                "status": new_status,
+                "approval_action": request.action,
+                "approval_comment": request.comment.strip(),
+                "approver_name": request.approver_name.strip(),
+                "approval_date": datetime.utcnow().isoformat()
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating approval: {str(e)}")
+
+@app.get("/api/applications")
+async def list_applications(status: str = None):
+    """
+    List all applications, optionally filtered by status
+
+    Parameters:
+    - status: Optional status filter (e.g., "Under Review", "Pending", "Approved", "Rejected", "Processing", "Ready for Review")
+    """
+    try:
+        applications = db.get_homeowner_applications(status_filter=status)
+        return {
+            "count": len(applications),
+            "status_filter": status,
+            "applications": applications
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving applications: {str(e)}")
+
+@app.post("/api/applications/{application_id}/respond")
+async def submit_applicant_response(application_id: str, request: ApplicantResponseRequest):
+    """
+    Submit applicant's response to a request for more information
+
+    This changes the status from "Under Review" to "Ready for Review"
+
+    Parameters:
+    - application_id: The application ID
+    - request: ApplicantResponseRequest with response text
+    """
+    if not request.response or not request.response.strip():
+        raise HTTPException(status_code=400, detail="Response is required")
+
+    try:
+        # Try database update first
+        success = db.submit_applicant_response(
+            application_id=application_id,
+            response=request.response.strip()
+        )
+
+        if success:
+            # Get updated application from database
+            updated_app = db.get_application_by_id(application_id)
+            if updated_app:
+                return {
+                    "success": True,
+                    "message": f"Response submitted successfully. Application {application_id} is now Ready for Review.",
+                    "application": updated_app
+                }
+
+        # If database operation failed or returned no data, use in-memory storage
+        # Check if application exists in memory and is "Under Review"
+        if application_id in in_memory_approvals:
+            current_status = in_memory_approvals[application_id].get('status')
+            if current_status == 'Under Review':
+                # Update to Ready for Review
+                in_memory_approvals[application_id]['status'] = 'Ready for Review'
+                in_memory_approvals[application_id]['applicant_response'] = request.response.strip()
+                in_memory_approvals[application_id]['applicant_response_date'] = datetime.utcnow().isoformat()
+
+                return {
+                    "success": True,
+                    "message": f"Response submitted successfully. Application {application_id} is now Ready for Review (stored in memory).",
+                    "application": {
+                        "id": application_id,
+                        **in_memory_approvals[application_id]
+                    }
+                }
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Application must be in 'Under Review' status to submit a response. Current status: {current_status}"
+                )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Application {application_id} not found or not in 'Under Review' status"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error submitting response: {str(e)}")
 
 # Static files and SPA routing
 static_dir = Path(__file__).parent / "static"

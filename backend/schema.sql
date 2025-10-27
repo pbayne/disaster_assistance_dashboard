@@ -47,6 +47,12 @@ CREATE TABLE IF NOT EXISTS pb_demo.disaster_assistance.homeowner_applications (
     risk_score INT NOT NULL,
     inspector_assigned BOOLEAN NOT NULL,
     inspector_name STRING,
+    approval_action STRING,
+    approval_comment STRING,
+    approver_name STRING,
+    approval_date TIMESTAMP,
+    applicant_response STRING,
+    applicant_response_date TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
     PRIMARY KEY (id)
