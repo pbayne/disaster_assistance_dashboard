@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import AnalyticsIcon from '@mui/icons-material/Analytics'
 import AssessmentIcon from '@mui/icons-material/Assessment'
+import DescriptionIcon from '@mui/icons-material/Description'
 import SettingsIcon from '@mui/icons-material/Settings'
 
 interface DrawerProps {
@@ -22,6 +23,7 @@ const navItems: NavItem[] = [
   { text: 'Dashboard', icon: <DashboardIcon /> },
   { text: 'Analytics', icon: <AnalyticsIcon /> },
   { text: 'Reports', icon: <AssessmentIcon /> },
+  { text: 'Workflow Documentation', icon: <DescriptionIcon /> },
   { text: 'Settings', icon: <SettingsIcon /> },
 ]
 

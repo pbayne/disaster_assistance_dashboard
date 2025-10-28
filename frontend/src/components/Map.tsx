@@ -1,17 +1,15 @@
 import { useEffect, useState, useRef } from 'react'
 import Map, { Marker, Popup, NavigationControl, Layer, Source } from 'react-map-gl/maplibre'
-import { Box, Card, CardContent, Typography, Stack, Chip, ToggleButtonGroup, ToggleButton, Slider, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, useTheme, Dialog, DialogTitle, DialogContent, DialogActions, Button, Divider, Grid, FormControl, InputLabel, Select, MenuItem, TableSortLabel, TextField, IconButton, Alert, Snackbar, ButtonGroup } from '@mui/material'
+import { Box, Card, CardContent, Typography, Stack, Chip, ToggleButtonGroup, ToggleButton, Slider, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, useTheme, Dialog, DialogTitle, DialogContent, DialogActions, Button, Divider, Grid, FormControl, InputLabel, Select, MenuItem, TableSortLabel, TextField, IconButton } from '@mui/material'
 import HomeIcon from '@mui/icons-material/Home'
 import CloseIcon from '@mui/icons-material/Close'
 import ClearIcon from '@mui/icons-material/Clear'
 import WarningIcon from '@mui/icons-material/Warning'
 import ErrorIcon from '@mui/icons-material/Error'
-import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import CancelIcon from '@mui/icons-material/Cancel'
-import InfoIcon from '@mui/icons-material/Info'
 import { motion } from 'framer-motion'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import '../map-popup.css'
+import { ApprovalWorkflow } from './ApprovalWorkflow'
 
 interface EarthquakeData {
   id: string
@@ -48,12 +46,9 @@ interface HomeownerApplicant {
   risk_score: number
   inspector_assigned: boolean
   inspector_name: string | null
-  approval_action?: string
-  approval_comment?: string
-  approver_name?: string
-  approval_date?: string
-  applicant_response?: string
-  applicant_response_date?: string
+  review_notes?: string
+  reviewer_name?: string
+  review_date?: string
 }
 
 // Get API base URL based on environment
@@ -115,25 +110,13 @@ export default function MapComponent() {
   const tableRowRefs = useRef<{ [key: string]: HTMLTableRowElement | null }>({})
   const mapRef = useRef<any>(null)
 
-  // Approval workflow state
-  const [approvalComment, setApprovalComment] = useState<string>('')
-  const [approverName, setApproverName] = useState<string>('')
-  const [isSubmittingApproval, setIsSubmittingApproval] = useState<boolean>(false)
-  const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false)
-  const [snackbarMessage, setSnackbarMessage] = useState<string>('')
-  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
-
-  // Applicant response state
-  const [applicantResponse, setApplicantResponse] = useState<string>('')
-  const [isSubmittingResponse, setIsSubmittingResponse] = useState<boolean>(false)
-
   // Fetch earthquake data
   useEffect(() => {
     const fetchEarthquakes = async () => {
       try {
         const apiBase = getApiBaseUrl()
         const response = await fetch(
-          `${apiBase}/api/earthquakes?timeframe=${timeframe}&min_magnitude=${minMagnitude}`
+          `${apiBase}/api/earthquakes?timeframe=${timeframe}&min_magnitude=${minMagnitude}&source=usgs`
         )
         const data = await response.json()
         setEarthquakes(data.earthquakes || [])
@@ -176,8 +159,6 @@ export default function MapComponent() {
         return '#4caf50' // Green
       case 'Under Review':
         return '#ff9800' // Orange
-      case 'Ready for Review':
-        return '#2196f3' // Blue
       case 'Pending':
         return '#9e9e9e' // Gray
       case 'Processing':
@@ -205,23 +186,40 @@ export default function MapComponent() {
   }
 
   const handleEarthquakeClick = async (earthquake: EarthquakeData) => {
+    console.log('🌍 Earthquake clicked:', earthquake.id, earthquake.place)
     setSelectedEarthquake(earthquake)
     setSelectedHomeowner(null)
 
     // Create 25-mile radius circle around the earthquake
     const circle = createCircle(earthquake.longitude, earthquake.latitude, 25)
     setRadiusCircle(circle)
+    console.log('✅ Circle created with', circle.length, 'points')
 
     // Fetch homeowner applicants within the radius
     try {
       const apiBase = getApiBaseUrl()
-      const response = await fetch(
-        `${apiBase}/api/homeowners?latitude=${earthquake.latitude}&longitude=${earthquake.longitude}&radius_miles=25`
-      )
+      const url = `${apiBase}/api/homeowners?latitude=${earthquake.latitude}&longitude=${earthquake.longitude}&radius_miles=25`
+      console.log('📡 Fetching homeowners from:', url)
+
+      const startTime = performance.now()
+      const response = await fetch(url)
+      const endTime = performance.now()
+
+      console.log(`⏱️ API response time: ${(endTime - startTime).toFixed(0)}ms`)
+      console.log(`📊 Response status: ${response.status} ${response.statusText}`)
+
+      if (!response.ok) {
+        console.error(`❌ API error: ${response.status} ${response.statusText}`)
+        setHomeowners([])
+        return
+      }
+
       const data = await response.json()
+      console.log('📦 Received data:', data)
+      console.log(`✅ Got ${data.applicants?.length || 0} homeowner applicants`)
       setHomeowners(data.applicants || [])
     } catch (error) {
-      console.error('Error fetching homeowner data:', error)
+      console.error('❌ Error fetching homeowner data:', error)
       setHomeowners([])
     }
 
@@ -253,154 +251,40 @@ export default function MapComponent() {
 
   const handleCloseDetails = () => {
     setDetailsDialogOpen(false)
-    // Reset forms
-    setApprovalComment('')
-    setApproverName('')
-    setApplicantResponse('')
   }
 
-  const handleApprovalAction = async (action: 'approve' | 'reject' | 'request_more_info') => {
-    if (!detailsHomeowner) return
-
-    if (!approvalComment.trim()) {
-      setSnackbarMessage('Please enter a comment')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-      return
-    }
-
-    if (!approverName.trim()) {
-      setSnackbarMessage('Please enter your name')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-      return
-    }
-
-    setIsSubmittingApproval(true)
-
+  const handleStatusUpdate = async (id: string, newStatus: string, notes?: string, reviewerName?: string) => {
+    const apiBase = getApiBaseUrl()
     try {
-      const apiBase = getApiBaseUrl()
-      const response = await fetch(
-        `${apiBase}/api/applications/${detailsHomeowner.id}/approve`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            action,
-            comment: approvalComment,
-            approver_name: approverName,
-          }),
-        }
-      )
+      const response = await fetch(`${apiBase}/api/homeowners/${id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: newStatus,
+          review_notes: notes,
+          reviewer_name: reviewerName,
+          review_date: new Date().toISOString()
+        })
+      })
+      if (!response.ok) throw new Error('Failed to update status')
 
-      const data = await response.json()
-
-      if (response.ok) {
-        setSnackbarMessage(`Application ${action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'marked for more information'}`)
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
-
-        // Update the details homeowner with new data
-        if (data.application) {
-          // Merge the approval data with existing homeowner data
-          const updatedHomeowner = {
-            ...detailsHomeowner,
-            ...data.application
-          }
-          setDetailsHomeowner(updatedHomeowner)
-
-          // Update homeowners list - merge approval data with existing data
-          setHomeowners(prevHomeowners =>
-            prevHomeowners.map(h =>
-              h.id === detailsHomeowner.id ? { ...h, ...data.application } : h
-            )
-          )
-        }
-
-        // Reset form
-        setApprovalComment('')
-        setApproverName('')
-      } else {
-        setSnackbarMessage(data.detail || 'Failed to submit approval')
-        setSnackbarSeverity('error')
-        setSnackbarOpen(true)
+      // Update local state
+      const updatedHomeowner = {
+        status: newStatus,
+        review_notes: notes,
+        reviewer_name: reviewerName,
+        review_date: new Date().toISOString()
       }
-    } catch (error) {
-      console.error('Error submitting approval:', error)
-      setSnackbarMessage('Error submitting approval')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    } finally {
-      setIsSubmittingApproval(false)
-    }
-  }
 
-  const handleSubmitApplicantResponse = async () => {
-    if (!detailsHomeowner) return
-
-    if (!applicantResponse.trim()) {
-      setSnackbarMessage('Please enter a response')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-      return
-    }
-
-    setIsSubmittingResponse(true)
-
-    try {
-      const apiBase = getApiBaseUrl()
-      const response = await fetch(
-        `${apiBase}/api/applications/${detailsHomeowner.id}/respond`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            response: applicantResponse,
-          }),
-        }
+      setHomeowners(prev => prev.map(h =>
+        h.id === id ? { ...h, ...updatedHomeowner } : h
+      ))
+      setDetailsHomeowner(prev =>
+        prev ? { ...prev, ...updatedHomeowner } : null
       )
-
-      const data = await response.json()
-
-      if (response.ok) {
-        setSnackbarMessage('Response submitted successfully! Status changed to Ready for Review.')
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
-
-        // Update the details homeowner with new data
-        if (data.application) {
-          const updatedHomeowner = {
-            ...detailsHomeowner,
-            ...data.application
-          }
-          setDetailsHomeowner(updatedHomeowner)
-
-          // Update homeowners list
-          setHomeowners(prevHomeowners =>
-            prevHomeowners.map(h =>
-              h.id === detailsHomeowner.id ? { ...h, ...data.application } : h
-            )
-          )
-        }
-
-        // Reset form
-        setApplicantResponse('')
-      } else {
-        setSnackbarMessage(data.detail || 'Failed to submit response')
-        setSnackbarSeverity('error')
-        setSnackbarOpen(true)
-      }
     } catch (error) {
-      console.error('Error submitting response:', error)
-      setSnackbarMessage('Error submitting response')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    } finally {
-      setIsSubmittingResponse(false)
+      console.error('Error updating status:', error)
+      alert('Failed to update status')
     }
   }
 
@@ -961,14 +845,13 @@ export default function MapComponent() {
                             color={
                               homeowner.status === 'Approved' ? 'success' :
                               homeowner.status === 'Under Review' ? 'warning' :
-                              homeowner.status === 'Ready for Review' ? 'info' :
                               homeowner.status === 'Pending' ? 'default' :
                               homeowner.status === 'Rejected' ? 'error' : 'info'
                             }
                           />
                         </TableCell>
-                        <TableCell>{homeowner.family_size || 'N/A'}</TableCell>
-                        <TableCell>{homeowner.estimated_damage ? `$${homeowner.estimated_damage.toLocaleString()}` : 'N/A'}</TableCell>
+                        <TableCell>{homeowner.family_size}</TableCell>
+                        <TableCell>${homeowner.estimated_damage.toLocaleString()}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1209,256 +1092,6 @@ export default function MapComponent() {
                   </Grid>
                 )}
 
-                {/* Approval Workflow Section */}
-                <Grid item xs={12}>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="overline" sx={{ color: 'primary.main', fontWeight: 700, fontSize: '0.875rem' }}>
-                    📝 Approval Workflow
-                  </Typography>
-
-                  {/* Display existing approval info if any */}
-                  {detailsHomeowner.approval_action && (
-                    <Box sx={{
-                      backgroundColor: theme.palette.mode === 'dark' ? 'rgba(33, 150, 243, 0.1)' : 'rgba(33, 150, 243, 0.05)',
-                      border: '2px solid',
-                      borderColor: 'primary.main',
-                      borderRadius: 2,
-                      p: 2,
-                      mt: 2,
-                      mb: 2
-                    }}>
-                      <Stack spacing={1}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Typography variant="caption" color="text.secondary">Action:</Typography>
-                          <Chip
-                            label={detailsHomeowner.approval_action.replace('_', ' ').toUpperCase()}
-                            size="small"
-                            color={
-                              detailsHomeowner.approval_action === 'approve' ? 'success' :
-                              detailsHomeowner.approval_action === 'reject' ? 'error' : 'warning'
-                            }
-                          />
-                        </Box>
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">Comment:</Typography>
-                          <Typography variant="body2">{detailsHomeowner.approval_comment}</Typography>
-                        </Box>
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">Approver:</Typography>
-                          <Typography variant="body2">{detailsHomeowner.approver_name}</Typography>
-                        </Box>
-                        {detailsHomeowner.approval_date && (
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">Date:</Typography>
-                            <Typography variant="body2">
-                              {new Date(detailsHomeowner.approval_date).toLocaleString()}
-                            </Typography>
-                          </Box>
-                        )}
-                      </Stack>
-                    </Box>
-                  )}
-
-                  {/* Approval action form */}
-                  <Box sx={{
-                    backgroundColor: theme.palette.mode === 'dark' ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.02)',
-                    borderRadius: 2,
-                    p: 2,
-                    mt: 2
-                  }}>
-                    <Stack spacing={2}>
-                      <TextField
-                        label="Your Name (Approver)"
-                        value={approverName}
-                        onChange={(e) => setApproverName(e.target.value)}
-                        fullWidth
-                        size="small"
-                        required
-                      />
-                      <TextField
-                        label="Comment"
-                        value={approvalComment}
-                        onChange={(e) => setApprovalComment(e.target.value)}
-                        multiline
-                        rows={3}
-                        fullWidth
-                        required
-                        placeholder="Enter your approval/rejection comment or request for additional information..."
-                      />
-                      <Box>
-                        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                          Select Action:
-                        </Typography>
-                        <ButtonGroup fullWidth variant="outlined">
-                          <Button
-                            color="success"
-                            startIcon={<CheckCircleIcon />}
-                            onClick={() => handleApprovalAction('approve')}
-                            disabled={isSubmittingApproval}
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            color="error"
-                            startIcon={<CancelIcon />}
-                            onClick={() => handleApprovalAction('reject')}
-                            disabled={isSubmittingApproval}
-                          >
-                            Reject
-                          </Button>
-                          <Button
-                            color="warning"
-                            startIcon={<InfoIcon />}
-                            onClick={() => handleApprovalAction('request_more_info')}
-                            disabled={isSubmittingApproval}
-                          >
-                            Request More Info
-                          </Button>
-                        </ButtonGroup>
-                      </Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                        Note: Approve sets status to "Approved", Reject to "Rejected", Request More Info to "Under Review"
-                      </Typography>
-                    </Stack>
-                  </Box>
-                </Grid>
-
-                {/* Applicant Response Section - Only show if status is "Under Review" */}
-                {detailsHomeowner.status === 'Under Review' && detailsHomeowner.approval_action === 'request_more_info' && (
-                  <Grid item xs={12}>
-                    <Divider sx={{ my: 2 }} />
-                    <Typography variant="overline" sx={{ color: 'warning.main', fontWeight: 700, fontSize: '0.875rem' }}>
-                      📩 Response Required
-                    </Typography>
-
-                    {/* Display existing response if any */}
-                    {detailsHomeowner.applicant_response && (
-                      <Box sx={{
-                        backgroundColor: theme.palette.mode === 'dark' ? 'rgba(76, 175, 80, 0.1)' : 'rgba(76, 175, 80, 0.05)',
-                        border: '2px solid',
-                        borderColor: 'success.main',
-                        borderRadius: 2,
-                        p: 2,
-                        mt: 2,
-                        mb: 2
-                      }}>
-                        <Stack spacing={1}>
-                          <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 700 }}>
-                            ✅ Response Submitted
-                          </Typography>
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">Your Response:</Typography>
-                            <Typography variant="body2">{detailsHomeowner.applicant_response}</Typography>
-                          </Box>
-                          {detailsHomeowner.applicant_response_date && (
-                            <Box>
-                              <Typography variant="caption" color="text.secondary">Submitted:</Typography>
-                              <Typography variant="body2">
-                                {new Date(detailsHomeowner.applicant_response_date).toLocaleString()}
-                              </Typography>
-                            </Box>
-                          )}
-                        </Stack>
-                      </Box>
-                    )}
-
-                    {/* Applicant response form */}
-                    <Box sx={{
-                      backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 152, 0, 0.1)' : 'rgba(255, 152, 0, 0.05)',
-                      border: '2px solid',
-                      borderColor: 'warning.main',
-                      borderRadius: 2,
-                      p: 2,
-                      mt: 2
-                    }}>
-                      <Stack spacing={2}>
-                        <Alert severity="warning" icon={<InfoIcon />}>
-                          <strong>Additional Information Required</strong>
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            The reviewer has requested more information:
-                          </Typography>
-                          <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 1 }}>
-                            "{detailsHomeowner.approval_comment}"
-                          </Typography>
-                        </Alert>
-
-                        <TextField
-                          label="Your Response"
-                          value={applicantResponse}
-                          onChange={(e) => setApplicantResponse(e.target.value)}
-                          multiline
-                          rows={4}
-                          fullWidth
-                          required
-                          placeholder="Provide the requested information or clarification..."
-                        />
-
-                        <Button
-                          variant="contained"
-                          color="warning"
-                          onClick={handleSubmitApplicantResponse}
-                          disabled={isSubmittingResponse}
-                          fullWidth
-                          size="large"
-                        >
-                          {isSubmittingResponse ? 'Submitting...' : 'Submit Response'}
-                        </Button>
-
-                        <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', textAlign: 'center' }}>
-                          Submitting your response will change the status to "Ready for Review"
-                        </Typography>
-                      </Stack>
-                    </Box>
-                  </Grid>
-                )}
-
-                {/* Display applicant response for reviewers (when status is "Ready for Review") */}
-                {detailsHomeowner.status === 'Ready for Review' && detailsHomeowner.applicant_response && (
-                  <Grid item xs={12}>
-                    <Divider sx={{ my: 2 }} />
-                    <Typography variant="overline" sx={{ color: 'info.main', fontWeight: 700, fontSize: '0.875rem' }}>
-                      📬 Applicant Response Received
-                    </Typography>
-
-                    <Box sx={{
-                      backgroundColor: theme.palette.mode === 'dark' ? 'rgba(33, 150, 243, 0.1)' : 'rgba(33, 150, 243, 0.05)',
-                      border: '2px solid',
-                      borderColor: 'info.main',
-                      borderRadius: 2,
-                      p: 2,
-                      mt: 2,
-                      mb: 2
-                    }}>
-                      <Stack spacing={1}>
-                        <Alert severity="info" icon={<InfoIcon />}>
-                          The applicant has responded to your request for more information
-                        </Alert>
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">Original Request:</Typography>
-                          <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
-                            "{detailsHomeowner.approval_comment}"
-                          </Typography>
-                        </Box>
-                        <Divider />
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">Applicant's Response:</Typography>
-                          <Typography variant="body1" sx={{ fontWeight: 500, mt: 0.5 }}>
-                            {detailsHomeowner.applicant_response}
-                          </Typography>
-                        </Box>
-                        {detailsHomeowner.applicant_response_date && (
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">Response Date:</Typography>
-                            <Typography variant="body2">
-                              {new Date(detailsHomeowner.applicant_response_date).toLocaleString()}
-                            </Typography>
-                          </Box>
-                        )}
-                      </Stack>
-                    </Box>
-                  </Grid>
-                )}
-
                 <Grid item xs={12}>
                   <Divider sx={{ my: 1 }} />
                   <Typography variant="overline" color="text.secondary">
@@ -1476,6 +1109,14 @@ export default function MapComponent() {
                       </Box>
                     </Box>
                   </Stack>
+                </Grid>
+
+                {/* Approval Workflow */}
+                <Grid item xs={12}>
+                  <ApprovalWorkflow
+                    applicant={detailsHomeowner}
+                    onStatusUpdate={handleStatusUpdate}
+                  />
                 </Grid>
               </Grid>
             </DialogContent>
@@ -1497,22 +1138,6 @@ export default function MapComponent() {
           </>
         )}
       </Dialog>
-
-      {/* Snackbar for feedback messages */}
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={6000}
-        onClose={() => setSnackbarOpen(false)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-      >
-        <Alert
-          onClose={() => setSnackbarOpen(false)}
-          severity={snackbarSeverity}
-          sx={{ width: '100%' }}
-        >
-          {snackbarMessage}
-        </Alert>
-      </Snackbar>
     </Box>
   )
 }
