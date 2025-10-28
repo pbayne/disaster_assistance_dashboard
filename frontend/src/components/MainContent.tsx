@@ -2,6 +2,7 @@ import { Box, Toolbar, Typography, Card, CardContent, Grid } from '@mui/material
 import { motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 import Map from './Map'
+import { WorkflowDocumentation } from './WorkflowDocumentation'
 
 interface MainContentProps {
   drawerOpen: boolean
@@ -52,6 +53,32 @@ export default function MainContent({
       >
         <Toolbar />
         <Map />
+      </Box>
+    )
+  }
+
+  // Render Workflow Documentation page
+  if (selectedPage === 'Workflow Documentation') {
+    return (
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          p: 3,
+          width: {
+            sm: `calc(100% - ${drawerOpen ? drawerWidth : drawerWidthClosed}px)`,
+          },
+          transition: (theme) =>
+            theme.transitions.create('width', {
+              easing: theme.transitions.easing.sharp,
+              duration: theme.transitions.duration.leavingScreen,
+            }),
+          overflowY: 'auto',
+          height: 'calc(100vh - 64px)',
+        }}
+      >
+        <Toolbar />
+        <WorkflowDocumentation />
       </Box>
     )
   }

@@ -9,6 +9,7 @@ import ErrorIcon from '@mui/icons-material/Error'
 import { motion } from 'framer-motion'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import '../map-popup.css'
+import { ApprovalWorkflow } from './ApprovalWorkflow'
 
 interface EarthquakeData {
   id: string
@@ -45,6 +46,9 @@ interface HomeownerApplicant {
   risk_score: number
   inspector_assigned: boolean
   inspector_name: string | null
+  review_notes?: string
+  reviewer_name?: string
+  review_date?: string
 }
 
 // Get API base URL based on environment
@@ -112,7 +116,7 @@ export default function MapComponent() {
       try {
         const apiBase = getApiBaseUrl()
         const response = await fetch(
-          `${apiBase}/api/earthquakes?timeframe=${timeframe}&min_magnitude=${minMagnitude}`
+          `${apiBase}/api/earthquakes?timeframe=${timeframe}&min_magnitude=${minMagnitude}&source=usgs`
         )
         const data = await response.json()
         setEarthquakes(data.earthquakes || [])
@@ -182,23 +186,40 @@ export default function MapComponent() {
   }
 
   const handleEarthquakeClick = async (earthquake: EarthquakeData) => {
+    console.log('🌍 Earthquake clicked:', earthquake.id, earthquake.place)
     setSelectedEarthquake(earthquake)
     setSelectedHomeowner(null)
 
     // Create 25-mile radius circle around the earthquake
     const circle = createCircle(earthquake.longitude, earthquake.latitude, 25)
     setRadiusCircle(circle)
+    console.log('✅ Circle created with', circle.length, 'points')
 
     // Fetch homeowner applicants within the radius
     try {
       const apiBase = getApiBaseUrl()
-      const response = await fetch(
-        `${apiBase}/api/homeowners?latitude=${earthquake.latitude}&longitude=${earthquake.longitude}&radius_miles=25`
-      )
+      const url = `${apiBase}/api/homeowners?latitude=${earthquake.latitude}&longitude=${earthquake.longitude}&radius_miles=25`
+      console.log('📡 Fetching homeowners from:', url)
+
+      const startTime = performance.now()
+      const response = await fetch(url)
+      const endTime = performance.now()
+
+      console.log(`⏱️ API response time: ${(endTime - startTime).toFixed(0)}ms`)
+      console.log(`📊 Response status: ${response.status} ${response.statusText}`)
+
+      if (!response.ok) {
+        console.error(`❌ API error: ${response.status} ${response.statusText}`)
+        setHomeowners([])
+        return
+      }
+
       const data = await response.json()
+      console.log('📦 Received data:', data)
+      console.log(`✅ Got ${data.applicants?.length || 0} homeowner applicants`)
       setHomeowners(data.applicants || [])
     } catch (error) {
-      console.error('Error fetching homeowner data:', error)
+      console.error('❌ Error fetching homeowner data:', error)
       setHomeowners([])
     }
 
@@ -230,6 +251,41 @@ export default function MapComponent() {
 
   const handleCloseDetails = () => {
     setDetailsDialogOpen(false)
+  }
+
+  const handleStatusUpdate = async (id: string, newStatus: string, notes?: string, reviewerName?: string) => {
+    const apiBase = getApiBaseUrl()
+    try {
+      const response = await fetch(`${apiBase}/api/homeowners/${id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: newStatus,
+          review_notes: notes,
+          reviewer_name: reviewerName,
+          review_date: new Date().toISOString()
+        })
+      })
+      if (!response.ok) throw new Error('Failed to update status')
+
+      // Update local state
+      const updatedHomeowner = {
+        status: newStatus,
+        review_notes: notes,
+        reviewer_name: reviewerName,
+        review_date: new Date().toISOString()
+      }
+
+      setHomeowners(prev => prev.map(h =>
+        h.id === id ? { ...h, ...updatedHomeowner } : h
+      ))
+      setDetailsHomeowner(prev =>
+        prev ? { ...prev, ...updatedHomeowner } : null
+      )
+    } catch (error) {
+      console.error('Error updating status:', error)
+      alert('Failed to update status')
+    }
   }
 
   const handleMapLoad = () => {
@@ -1053,6 +1109,14 @@ export default function MapComponent() {
                       </Box>
                     </Box>
                   </Stack>
+                </Grid>
+
+                {/* Approval Workflow */}
+                <Grid item xs={12}>
+                  <ApprovalWorkflow
+                    applicant={detailsHomeowner}
+                    onStatusUpdate={handleStatusUpdate}
+                  />
                 </Grid>
               </Grid>
             </DialogContent>
