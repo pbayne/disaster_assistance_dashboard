@@ -2,6 +2,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime
 from pathlib import Path
 import os
@@ -9,7 +11,6 @@ import httpx
 import random
 import math
 from dotenv import load_dotenv
-import db
 
 load_dotenv()
 
@@ -19,12 +20,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Initialize database schema on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database schema when app starts"""
-    db.initialize_schema()
-
 # CORS middleware for local development
 app.add_middleware(
     CORSMiddleware,
@@ -33,6 +28,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Pydantic models for request/response
+class StatusUpdateRequest(BaseModel):
+    status: str
+    review_notes: Optional[str] = None
+    reviewer_name: Optional[str] = None
+    review_date: Optional[str] = None
 
 # Health check endpoint
 @app.get("/api/health")
@@ -107,12 +109,6 @@ async def get_earthquakes(timeframe: str = "hour", min_magnitude: float = 2.5):
                         "type": props.get("type"),
                     }
                     earthquakes.append(earthquake)
-
-                    # Save to database (non-blocking)
-                    try:
-                        db.save_earthquake_event(earthquake)
-                    except Exception as e:
-                        print(f"Warning: Failed to save earthquake to database: {e}")
 
             return {
                 "count": len(earthquakes),
@@ -275,17 +271,36 @@ async def generate_homeowner_applicants(latitude: float, longitude: float, radiu
 
         applicants.append(applicant)
 
-        # Save to database (non-blocking, continues even if DB save fails)
-        try:
-            db.save_homeowner_application(applicant)
-        except Exception as e:
-            print(f"Warning: Failed to save application to database: {e}")
-
     return {
         "count": len(applicants),
         "center": {"latitude": latitude, "longitude": longitude},
         "radius_miles": radius_miles,
         "applicants": applicants
+    }
+
+# Update homeowner application status
+@app.put("/api/homeowners/{homeowner_id}/status")
+async def update_homeowner_status(homeowner_id: str, update: StatusUpdateRequest):
+    """
+    Update the status of a homeowner application
+
+    Parameters:
+    - homeowner_id: The application ID
+    - update: Status update information including status, review_notes, reviewer_name, and review_date
+
+    Note: This is a mock endpoint for local development. In production with Databricks,
+    this would update the database and return the updated record.
+    """
+    # For local development, we just return success
+    # In production, this would update the database
+    return {
+        "success": True,
+        "id": homeowner_id,
+        "status": update.status,
+        "review_notes": update.review_notes,
+        "reviewer_name": update.reviewer_name,
+        "review_date": update.review_date or datetime.utcnow().isoformat(),
+        "message": f"Status updated to {update.status}"
     }
 
 # Data generation endpoint for testing/populating database
@@ -335,10 +350,7 @@ async def generate_test_data(num_earthquakes: int = 50, num_homeowners: int = 10
                 "tsunami": 1 if random.random() > 0.95 else 0,
                 "type": "earthquake"
             }
-
-            # Save to database
-            if db.save_earthquake_event(earthquake):
-                results["earthquakes_generated"] += 1
+            results["earthquakes_generated"] += 1
         except Exception as e:
             results["errors"].append(f"Earthquake {i}: {str(e)}")
 
@@ -443,10 +455,7 @@ async def generate_test_data(num_earthquakes: int = 50, num_homeowners: int = 10
                 "inspector_assigned": random.choice([True, False]) if status in ["Under Review", "Processing"] else False,
                 "inspector_name": f"{random.choice(first_names)} {random.choice(last_names)}" if random.random() > 0.5 else None
             }
-
-            # Save to database
-            if db.save_homeowner_application(application):
-                results["homeowners_generated"] += 1
+            results["homeowners_generated"] += 1
         except Exception as e:
             results["errors"].append(f"Homeowner {i}: {str(e)}")
 
