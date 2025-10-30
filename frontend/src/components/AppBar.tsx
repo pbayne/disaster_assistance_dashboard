@@ -1,10 +1,20 @@
-import { useContext } from 'react'
-import { AppBar, Toolbar, Typography, IconButton, Button, useTheme, Box } from '@mui/material'
+import { useContext, useEffect, useState } from 'react'
+import { AppBar, Toolbar, Typography, IconButton, Button, useTheme, Box, Tooltip, CircularProgress } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import ApiIcon from '@mui/icons-material/Api'
 import Brightness4Icon from '@mui/icons-material/Brightness4'
 import Brightness7Icon from '@mui/icons-material/Brightness7'
+import StorageIcon from '@mui/icons-material/Storage'
 import { ColorModeContext } from '../main'
+
+interface DatabaseHealth {
+  status: string
+  healthy: boolean
+  database_name?: string
+  host?: string
+  response_time_ms?: number
+  error?: string
+}
 
 interface AppBarProps {
   drawerOpen: boolean
@@ -21,6 +31,68 @@ export default function AppBarComponent({
 }: AppBarProps) {
   const theme = useTheme()
   const colorMode = useContext(ColorModeContext)
+  const [dbHealth, setDbHealth] = useState<DatabaseHealth | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // Fetch database health on mount and every 10 seconds
+  useEffect(() => {
+    const fetchDbHealth = async () => {
+      try {
+        const response = await fetch('/api/database/health')
+        const data = await response.json()
+        setDbHealth(data)
+        setLoading(false)
+      } catch (error) {
+        setDbHealth({ status: 'disconnected', healthy: false, error: 'Failed to fetch' })
+        setLoading(false)
+      }
+    }
+
+    fetchDbHealth()
+    const interval = setInterval(fetchDbHealth, 10000) // Refresh every 10 seconds
+
+    return () => clearInterval(interval)
+  }, [])
+
+  // Database connectivity indicator
+  const renderDbIndicator = () => {
+    if (loading) {
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center', mr: 2 }}>
+          <CircularProgress size={16} sx={{ color: theme.palette.text.secondary }} />
+        </Box>
+      )
+    }
+
+    const isConnected = dbHealth?.healthy === true
+    const tooltipText = isConnected
+      ? `PostgreSQL: ${dbHealth?.database_name || 'Connected'} (${dbHealth?.response_time_ms?.toFixed(1)}ms)`
+      : `PostgreSQL: ${dbHealth?.error || 'Disconnected'}`
+
+    return (
+      <Tooltip title={tooltipText}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mr: 2, cursor: 'pointer' }}>
+          <StorageIcon
+            sx={{
+              mr: 0.5,
+              fontSize: 20,
+              color: theme.palette.mode === 'dark' ? '#ffffff' : '#003366'
+            }}
+          />
+          <Box
+            sx={{
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              backgroundColor: isConnected ? '#10b981' : '#ef4444',
+              boxShadow: isConnected ? '0 0 8px rgba(16, 185, 129, 0.6)' : '0 0 8px rgba(239, 68, 68, 0.6)',
+              animation: isConnected ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none'
+            }}
+          />
+        </Box>
+      </Tooltip>
+    )
+  }
 
   return (
     <AppBar
@@ -66,6 +138,7 @@ export default function AppBarComponent({
         <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
           Disaster Assistance
         </Typography>
+        {renderDbIndicator()}
         <IconButton
           sx={{
             mr: 1,

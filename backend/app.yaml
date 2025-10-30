@@ -1,0 +1,26 @@
+command:
+  - "python"
+  - "-m"
+  - "uvicorn"
+  - "main:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  # PostgreSQL connection using Neon database (stored in Databricks secrets)
+  - name: POSTGRES_HOST
+    valueFrom: "{{secrets/disaster-assistance/postgres_host}}"
+  - name: POSTGRES_DB
+    valueFrom: "{{secrets/disaster-assistance/postgres_db}}"
+  - name: POSTGRES_USER
+    valueFrom: "{{secrets/disaster-assistance/postgres_user}}"
+  - name: POSTGRES_PASSWORD
+    valueFrom: "{{secrets/disaster-assistance/postgres_password}}"
+
+  # Databricks configuration (for connecting to E2 demo from FE VM)
+  - name: DATABRICKS_HOST
+    valueFrom: "{{secrets/disaster-assistance/databricks_host}}"
+  - name: DATABRICKS_TOKEN
+    valueFrom: "{{secrets/disaster-assistance/databricks_token}}"
