@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 import Map from './Map'
 import { WorkflowDocumentation } from './WorkflowDocumentation'
+import { Settings } from './Settings'
 
 interface MainContentProps {
   drawerOpen: boolean
@@ -79,6 +80,32 @@ export default function MainContent({
       >
         <Toolbar />
         <WorkflowDocumentation />
+      </Box>
+    )
+  }
+
+  // Render Settings page
+  if (selectedPage === 'Settings') {
+    return (
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          p: 3,
+          width: {
+            sm: `calc(100% - ${drawerOpen ? drawerWidth : drawerWidthClosed}px)`,
+          },
+          transition: (theme) =>
+            theme.transitions.create('width', {
+              easing: theme.transitions.easing.sharp,
+              duration: theme.transitions.duration.leavingScreen,
+            }),
+          overflowY: 'auto',
+          height: 'calc(100vh - 64px)',
+        }}
+      >
+        <Toolbar />
+        <Settings />
       </Box>
     )
   }

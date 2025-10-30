@@ -142,6 +142,229 @@ Returns sample data with a timestamp.
 }
 ```
 
+## Database Setup
+
+This application uses **PostgreSQL** (via Neon serverless database) for persistent data storage of earthquakes and homeowner assistance applications.
+
+### Database Schema
+
+The database consists of 4 main tables:
+
+#### 1. Earthquakes Table
+Stores earthquake event data from USGS.
+
+```sql
+CREATE TABLE earthquakes (
+    id VARCHAR PRIMARY KEY,           -- USGS event ID
+    magnitude FLOAT NOT NULL,         -- Earthquake magnitude
+    place VARCHAR NOT NULL,           -- Location description
+    time BIGINT NOT NULL,            -- Event time (Unix timestamp ms)
+    updated BIGINT,                  -- Last updated (Unix timestamp ms)
+    longitude FLOAT NOT NULL,        -- Longitude coordinate
+    latitude FLOAT NOT NULL,         -- Latitude coordinate
+    depth FLOAT,                     -- Depth in kilometers
+    url VARCHAR,                     -- USGS event page URL
+    detail VARCHAR,                  -- USGS detail API URL
+    felt INTEGER,                    -- Number of "felt" reports
+    tsunami INTEGER DEFAULT 0,       -- Tsunami flag (0 or 1)
+    type VARCHAR DEFAULT 'earthquake', -- Event type
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### 2. Homeowners Table
+Stores homeowner assistance applications with approval workflow.
+
+```sql
+CREATE TABLE homeowners (
+    id VARCHAR PRIMARY KEY,          -- Application ID (e.g., "APP-12345678")
+    name VARCHAR NOT NULL,           -- Applicant name
+    address VARCHAR NOT NULL,        -- Property address
+    latitude FLOAT NOT NULL,         -- Property latitude
+    longitude FLOAT NOT NULL,        -- Property longitude
+    damage_level VARCHAR NOT NULL,   -- 'severe', 'moderate', or 'minor'
+    estimated_cost FLOAT NOT NULL,   -- Estimated damage cost
+    contact VARCHAR,                 -- Phone number
+    status VARCHAR DEFAULT 'Pending', -- Workflow status
+    review_notes TEXT,               -- Admin/applicant notes
+    reviewer_name VARCHAR,           -- Who reviewed/responded
+    review_date TIMESTAMP,           -- When reviewed/responded
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### 3. Inspectors Table
+Stores building inspector information.
+
+```sql
+CREATE TABLE inspectors (
+    id VARCHAR PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    contact VARCHAR,
+    specialty VARCHAR,
+    availability VARCHAR DEFAULT 'available',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### 4. Sync Metadata Table
+Tracks synchronization status for earthquake data.
+
+```sql
+CREATE TABLE sync_metadata (
+    id SERIAL PRIMARY KEY,
+    sync_type VARCHAR NOT NULL,      -- 'earthquake'
+    last_sync_time BIGINT,           -- Last sync timestamp (Unix ms)
+    last_sync_date TIMESTAMP,        -- Last sync date
+    records_synced INTEGER DEFAULT 0, -- Number of records synced
+    status VARCHAR DEFAULT 'pending', -- 'success', 'failed', 'pending'
+    error_message TEXT,              -- Error details if failed
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Database Configuration
+
+#### Step 1: Set Up Neon PostgreSQL Database
+
+1. **Create a Neon account** at [neon.tech](https://neon.tech)
+2. **Create a new project** and database
+3. **Copy your connection string** from the Neon dashboard
+
+#### Step 2: Configure Environment Variables
+
+Create a `.env` file in the `backend/` directory:
+
+```bash
+# PostgreSQL Configuration (Neon)
+POSTGRES_HOST=your-project.neon.tech
+POSTGRES_DB=your-database-name
+POSTGRES_USER=your-username
+POSTGRES_PASSWORD=your-password
+```
+
+#### Step 3: Initialize Database Schema
+
+The schema is automatically created when the application starts. The `database.py` file uses SQLAlchemy ORM to create all tables on first run:
+
+```bash
+cd backend
+python -c "from database import init_db; init_db()"
+```
+
+Or simply start the backend server (tables will be created automatically):
+
+```bash
+uvicorn main:app --reload --port 8000
+```
+
+### Data Seeding
+
+#### Seeding Earthquake Data
+
+Sync earthquake data from USGS API:
+
+```bash
+# Sync earthquakes (magnitude 2.5+, last 30 days)
+curl -X POST "http://localhost:8000/api/earthquakes/sync?min_magnitude=2.5&max_results=1000"
+
+# Check sync status
+curl "http://localhost:8000/api/earthquakes/sync/status"
+```
+
+The sync endpoint automatically:
+- Fetches only new/updated earthquakes since last sync
+- Stores them in PostgreSQL
+- Tracks sync metadata for incremental updates
+
+#### Seeding Homeowner Data
+
+**Option 1: Add New Homeowners (Preserves Existing Data)**
+
+```bash
+cd backend
+
+# Seed 30 homeowners in San Francisco Bay Area
+python3 seed_additional_homeowners.py 30 37.7749 -122.4194 150
+
+# Seed 100 homeowners in Los Angeles
+python3 seed_additional_homeowners.py 100 34.0522 -118.2437 150
+
+# Seed 75 homeowners in San Diego
+python3 seed_additional_homeowners.py 75 32.7157 -117.1611 100
+```
+
+**Parameters:**
+- Argument 1: Number of homeowners to generate
+- Argument 2: Center latitude
+- Argument 3: Center longitude
+- Argument 4: Radius in miles
+
+**Option 2: Replace All Homeowners (Initial Seed)**
+
+```bash
+cd backend
+
+# Replace all data with 50 homeowners in a specific area
+python3 seed_homeowners.py 50 37.7749 -122.4194 25
+```
+
+⚠️ **Note:** `seed_homeowners.py` clears existing data, while `seed_additional_homeowners.py` adds to existing data.
+
+#### Reset Application Statuses
+
+Reset all homeowner applications to "Pending" status:
+
+```bash
+cd backend
+python3 reset_statuses.py
+```
+
+This clears all review notes, reviewer names, and review dates, setting all applications back to pending state.
+
+### Database Health Check
+
+Check database connectivity and table statistics:
+
+```bash
+curl "http://localhost:8000/api/database/health"
+```
+
+Returns:
+```json
+{
+  "status": "connected",
+  "database": "your-database-name",
+  "host": "your-project.neon.tech",
+  "response_time_ms": 45.2,
+  "tables": {
+    "earthquakes": 1250,
+    "homeowners": 525,
+    "inspectors": 0,
+    "sync_metadata": 1
+  }
+}
+```
+
+### Databricks Secret Configuration
+
+For Databricks deployment, store database credentials as secrets:
+
+```bash
+# Create secret scope
+databricks secrets create-scope disaster-assistance
+
+# Add database secrets
+databricks secrets put-secret disaster-assistance postgres_host
+databricks secrets put-secret disaster-assistance postgres_db
+databricks secrets put-secret disaster-assistance postgres_user
+databricks secrets put-secret disaster-assistance postgres_password
+```
+
+The `app.yaml` file automatically loads these secrets as environment variables in the Databricks app.
+
 ## Deployment to Databricks
 
 ### Prerequisites

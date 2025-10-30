@@ -107,6 +107,12 @@ export default function MapComponent() {
   const [filterAssistanceType, setFilterAssistanceType] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState<string>('')
 
+  // Legacy sync state (kept for compatibility with disabled sync button)
+  // @ts-ignore - unused but needed for legacy handleSync function
+  const [syncing, setSyncing] = useState(false)
+  // @ts-ignore - unused but needed for legacy handleSync function
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
+
   const tableRowRefs = useRef<{ [key: string]: HTMLTableRowElement | null }>({})
   const mapRef = useRef<any>(null)
 
@@ -285,6 +291,49 @@ export default function MapComponent() {
     } catch (error) {
       console.error('Error updating status:', error)
       alert('Failed to update status')
+    }
+  }
+
+  // @ts-ignore - Legacy sync function, currently disabled
+  const handleSync = async () => {
+    setSyncing(true)
+    setSyncMessage('Fetching earthquake data from USGS...')
+    try {
+      const apiBase = getApiBaseUrl()
+      const response = await fetch(
+        `${apiBase}/api/earthquakes/sync?min_magnitude=${minMagnitude}`,
+        { method: 'POST' }
+      )
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      const result = await response.json()
+
+      if (result.success) {
+        const newRecords = result.new_records || 0
+        const updatedRecords = result.updated_records || 0
+        const total = newRecords + updatedRecords
+        setSyncMessage(`✓ Synced ${total} earthquake${total !== 1 ? 's' : ''} (${newRecords} new, ${updatedRecords} updated)`)
+
+        // Refresh earthquake data after sync
+        setSyncMessage('Refreshing map...')
+        const earthquakeResponse = await fetch(
+          `${apiBase}/api/earthquakes?timeframe=${timeframe}&min_magnitude=${minMagnitude}&source=usgs`
+        )
+        const earthquakeData = await earthquakeResponse.json()
+        setEarthquakes(earthquakeData.earthquakes || [])
+        setSyncMessage(`✓ Synced ${total} earthquake${total !== 1 ? 's' : ''}`)
+      } else {
+        setSyncMessage(`✗ Error: ${result.error}`)
+      }
+    } catch (error) {
+      setSyncMessage(`✗ Sync failed: ${error}`)
+    } finally {
+      setSyncing(false)
+      // Clear message after 10 seconds
+      setTimeout(() => setSyncMessage(null), 10000)
     }
   }
 
@@ -469,6 +518,56 @@ export default function MapComponent() {
                   color="primary"
                 />
               </Box>
+
+              {/* Sync button temporarily disabled - use backend monthly_sync.py script instead */}
+              {/*
+              <Box>
+                <Button
+                  variant="contained"
+                  startIcon={syncing ? <CircularProgress size={20} color="inherit" /> : <SyncIcon />}
+                  onClick={handleSync}
+                  disabled={syncing}
+                  fullWidth
+                  sx={{
+                    background: theme.palette.mode === 'dark'
+                      ? 'linear-gradient(135deg, #006699, #89d1d6)'
+                      : 'linear-gradient(135deg, #003366, #006699)',
+                    color: 'white',
+                    fontWeight: 600,
+                    py: 1.5,
+                    '&:hover': {
+                      background: theme.palette.mode === 'dark'
+                        ? 'linear-gradient(135deg, #005580, #6fb8bd)'
+                        : 'linear-gradient(135deg, #002244, #005580)',
+                    },
+                    '&.Mui-disabled': {
+                      background: theme.palette.mode === 'dark'
+                        ? 'rgba(100, 116, 139, 0.3)'
+                        : 'rgba(0, 51, 102, 0.3)',
+                      color: 'rgba(255, 255, 255, 0.5)',
+                    }
+                  }}
+                >
+                  {syncing ? 'Synchronizing...' : 'Sync Earthquake Data'}
+                </Button>
+                {syncMessage && (
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      mt: 1,
+                      display: 'block',
+                      textAlign: 'center',
+                      color: syncMessage.includes('Error') || syncMessage.includes('failed')
+                        ? 'error.main'
+                        : 'success.main',
+                      fontWeight: 500
+                    }}
+                  >
+                    {syncMessage}
+                  </Typography>
+                )}
+              </Box>
+              */}
             </Stack>
           </CardContent>
         </Card>
